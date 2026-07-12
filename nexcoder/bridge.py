@@ -74,6 +74,7 @@ class Bridge(QObject):
     agent_status = Signal(str)              # JSON status update
     agent_diff = Signal(str)                # JSON diff for approval
     agent_complete = Signal(str)            # JSON completion result
+    agent_event = Signal(str)               # JSON AgentEvent (v2 engine)
     git_updated = Signal(str)               # JSON git status
     project_opened = Signal(str)            # JSON project info
     search_results = Signal(str)            # JSON search results
@@ -113,6 +114,8 @@ class Bridge(QObject):
         self._fs.tree_changed.connect(self.on_fs_changed)
 
         self._current_project_path: str | None = None
+        self._agent_v2_worker = None
+        self._agent_v2_gate = None
 
     def _require_project_path(self) -> str:
         if not self._current_project_path:
@@ -466,6 +469,63 @@ class Bridge(QObject):
             context.setdefault("task_type", "implement")
             self._agent.run_mode("agent", prompt, context)
             return json.dumps({"success": True, "mode": "agent"})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, result=str)
+    def agent_run_v2(self, prompt: str) -> str:
+        """v2 agentic engine: direct edits with checkpoints, gated commands."""
+        try:
+            if self._agent_v2_worker is not None and self._agent_v2_worker.isRunning():
+                return json.dumps({"success": False, "error": "Agent is already running"})
+            project_root = self._require_project_path()
+            from nexcoder.agent.agent_runtime_v2 import AgentV2Worker, UiPermissionGate
+            self._agent_v2_gate = UiPermissionGate(
+                on_request=lambda rid, tool, detail: self.agent_event.emit(json.dumps({
+                    "type": "permission_request",
+                    "payload": {"id": rid, "tool": tool, "command": detail}})))
+            self._agent_v2_worker = AgentV2Worker(project_root, prompt, self._agent_v2_gate)
+            self._agent_v2_worker.event_json.connect(self.agent_event.emit)
+            self._agent_v2_worker.finished_json.connect(self._on_agent_v2_finished)
+            self._agent_v2_worker.start()
+            return json.dumps({"success": True, "mode": "agent_v2"})
+        except Exception as e:
+            return slot_error_response(e)
+
+    def _on_agent_v2_finished(self, result_json: str) -> None:
+        self.agent_complete.emit(result_json)
+        try:
+            if self._current_project_path:
+                tree = self._fs.get_file_tree(self._current_project_path)
+                self.file_tree_updated.emit(json.dumps(tree))
+        except Exception:
+            pass
+
+    @Slot(str, str, result=str)
+    def agent_permission_response(self, request_id: str, decision: str) -> str:
+        if self._agent_v2_gate is not None:
+            self._agent_v2_gate.resolve(request_id, decision)
+        return json.dumps({"success": True})
+
+    @Slot(str, result=str)
+    def agent_revert_run(self, checkpoint_id: str) -> str:
+        from nexcoder.services.checkpoint import CheckpointManager
+        try:
+            manager = CheckpointManager(self._require_project_path())
+            restored = manager.restore(checkpoint_id)
+            tree = self._fs.get_file_tree(self._current_project_path)
+            self.file_tree_updated.emit(json.dumps(tree))
+            return json.dumps({"success": True, **restored})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, str, result=str)
+    def agent_revert_file(self, checkpoint_id: str, path: str) -> str:
+        from nexcoder.services.checkpoint import CheckpointManager
+        try:
+            manager = CheckpointManager(self._require_project_path())
+            restored = manager.restore(checkpoint_id, files=[path])
+            return json.dumps({"success": True, **restored})
         except Exception as e:
             return slot_error_response(e)
 
