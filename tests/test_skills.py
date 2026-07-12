@@ -69,8 +69,10 @@ class SkillsRegistryTests(unittest.TestCase):
         # Every category except security (which only has one) should
         # have at least one skill. The registry may add new categories
         # later; this test just guards against an empty category bug.
+        # "project" is populated from the open project's .nexcoder/skills
+        # and is expected to be empty when no project_root is passed.
         for cat_id, skills in grouped["skills_by_category"].items():
-            if cat_id != "security":
+            if cat_id not in {"security", "project"}:
                 self.assertGreater(len(skills), 0, f"category {cat_id!r} is empty")
 
 
