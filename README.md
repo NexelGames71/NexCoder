@@ -23,6 +23,25 @@ venv\Scripts\python.exe build.py
 
 The packaged app is written to `dist\NexCoder`.
 
+## Local Qwen3-Coder-30B-A3B GGUF Model (recommended)
+
+The MoE 30B (3B active) model is markedly more reliable for agent mode than
+the 7B and runs on 32GB RAM + a consumer GPU via partial offload:
+
+```powershell
+cd models
+.\start_qwen3_coder.bat
+```
+
+Then point the agent at a matching context budget:
+
+```powershell
+$env:NEXA_CONTEXT_WINDOW = "16384"
+```
+
+Tuning: `NEXCODER_GGUF_GPU_LAYERS` (default 14 — raise with more VRAM,
+lower on CUDA OOM), `NEXCODER_GGUF_CTX` (default 16384).
+
 ## Local Qwen2.5-Coder GGUF Model
 
 NexCoder can use the bundled `Qwen2.5-Coder-7B-Instruct` GGUF model through the local OpenAI-compatible server in `models/server.py`.
