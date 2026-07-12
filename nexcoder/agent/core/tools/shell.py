@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import threading
 import time
@@ -14,11 +16,28 @@ from nexcoder.agent.core.tools.base import ALLOW, ToolBelt, ToolContext, ToolSpe
 DEFAULT_TIMEOUT = 180.0
 TAIL_CHARS = 8000
 
+_SINGLE_QUOTED = re.compile(r"'([^']*)'")
+
+
+def windows_normalize_quotes(command: str) -> str:
+    """cmd.exe has no single-quote semantics, but LLMs emit POSIX quoting.
+
+    Convert paired single-quoted segments to double quotes in the
+    unambiguous case: the command contains no double quotes and an even
+    number of single quotes. Lone apostrophes (don't) are left alone.
+    """
+    if '"' in command or command.count("'") < 2 or command.count("'") % 2 != 0:
+        return command
+    return _SINGLE_QUOTED.sub(
+        lambda match: '"' + match.group(1) + '"', command)
+
 
 def run_command(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     command = str(args.get("command") or "").strip()
     if not command:
         return {"success": False, "error_code": "invalid_args", "error": "Missing command"}
+    if os.name == "nt":
+        command = windows_normalize_quotes(command)
     if ctx.safety.is_command_blocked(command):
         return {"success": False, "error_code": "tool_command_blocked",
                 "error": "Blocked dangerous command"}

@@ -42,6 +42,17 @@ def test_run_command_blocklist_always_wins(tmp_path):
     assert result["error_code"] == "tool_command_blocked"
 
 
+def test_windows_quote_normalization():
+    from nexcoder.agent.core.tools.shell import windows_normalize_quotes
+    assert windows_normalize_quotes("git commit -m 'fix: the bug'") == \
+        'git commit -m "fix: the bug"'
+    assert windows_normalize_quotes("echo 'a' && echo 'b'") == 'echo "a" && echo "b"'
+    # Already double-quoted: untouched
+    assert windows_normalize_quotes('git commit -m "it\'s fine"') == 'git commit -m "it\'s fine"'
+    # Lone apostrophe: untouched
+    assert windows_normalize_quotes("echo don't panic") == "echo don't panic"
+
+
 def test_run_command_timeout(tmp_path):
     belt, ctx, _ = make(tmp_path)
     code = "import time; time.sleep(30)"
