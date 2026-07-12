@@ -351,9 +351,21 @@ export default function AIPanel() {
       }
       useAgentRunStore.getState().start();
       try {
-        await agentRunV2(task, skillId);
+        const result = await agentRunV2(task, skillId);
+        if (result && result.success === false) {
+          // Surface bridge-level refusals (no project open, agent busy)
+          // instead of leaving the panel silently empty.
+          useAgentRunStore.getState().handleEvent({
+            type: 'run_error',
+            payload: { error: result.error || 'The agent could not start.' },
+          });
+          setStreaming(false);
+        }
       } catch (e) {
         console.error(e);
+        useAgentRunStore.getState().handleEvent({
+          type: 'run_error', payload: { error: String(e) },
+        });
         setStreaming(false);
       }
       return;
