@@ -30,7 +30,7 @@ const STORAGE_KEY = 'nexcoder_agent_settings';
 // GGUF, MoE with 3B active params) is markedly more reliable at agentic
 // tool use than the 7B and still runs locally via partial GPU offload.
 export const DEFAULT_AI_MODEL = 'qwen3-coder-30b-a3b-instruct-q4_k_m';
-export const DEFAULT_AI_ENDPOINT = 'http://127.0.0.1:8001';
+export const DEFAULT_AI_ENDPOINT = 'http://127.0.0.1:8002';
 // Settings saved before this version had a 7B model id as the default;
 // they migrate to the 30B once, then user choices stick.
 const SETTINGS_VERSION = 2;

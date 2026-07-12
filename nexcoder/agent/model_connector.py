@@ -59,7 +59,7 @@ class ModelConnector:
     """Connects to OpenAI-compatible AI backends."""
 
     def __init__(self) -> None:
-        self._base_url = os.getenv("NEXA_API_URL", "http://127.0.0.1:8001")
+        self._base_url = os.getenv("NEXA_API_URL", "http://127.0.0.1:8002")
         self._api_key = os.getenv("NEXA_API_KEY", "")
         self._model = os.getenv("NEXA_MODEL", "default")
         self._timeout = float(os.getenv("NEXA_TIMEOUT", "120"))

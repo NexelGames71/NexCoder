@@ -3,7 +3,7 @@ title NexCoder Model API Server (Qwen3-Coder-30B-A3B)
 echo ============================================
 echo   NexCoder Model API Server
 echo   Model: Qwen3-Coder-30B-A3B-Instruct Q4_K_M
-echo   Endpoint: http://127.0.0.1:8001
+echo   Endpoint: http://127.0.0.1:8002
 echo ============================================
 echo.
 
@@ -33,6 +33,6 @@ set NEXCODER_REQUIRE_GPU=1
 
 echo Starting server...
 echo %MODEL_PATH%
-python server.py --port 8001 --model-path "%MODEL_PATH%"
+python server.py --port 8002 --model-path "%MODEL_PATH%"
 
 pause
