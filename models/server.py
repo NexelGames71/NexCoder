@@ -17,6 +17,8 @@ Start with:
 
 import argparse
 import asyncio
+import difflib
+import hashlib
 import json
 import logging
 import os
@@ -250,8 +252,113 @@ def _generate_threaded(kwargs: dict):
         model.generate(**kwargs)
 
 
+class SemanticResponseCache:
+    """Response cache for single-turn questions keyed by near-identical text.
+
+    Deliberately NOT used for multi-turn or tool-bearing requests: in agent
+    runs, similar wording does not imply similar project state, and replaying
+    a cached tool call against changed files would be wrong.
+    """
+
+    def __init__(self, max_entries: int = 64, ttl_seconds: float = 1800.0,
+                 threshold: float = 0.96) -> None:
+        self.max_entries = max_entries
+        self.ttl_seconds = ttl_seconds
+        self.threshold = threshold
+        self._entries: list[dict] = []
+        self._lock = Lock()
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    @staticmethod
+    def eligibility_key(request, messages: list[dict]):
+        """Return (system_hash, user_text) for cacheable requests, else None."""
+        if getattr(request, "tools", None):
+            return None
+        non_system = [m for m in messages if m.get("role") != "system"]
+        if len(non_system) != 1 or non_system[0].get("role") != "user":
+            return None
+        user_text = str(non_system[0].get("content") or "")
+        if not user_text.strip() or "<tool_response>" in user_text:
+            return None
+        system_text = "\n".join(
+            str(m.get("content") or "") for m in messages if m.get("role") == "system")
+        system_hash = hashlib.sha256(system_text.encode("utf-8")).hexdigest()[:16]
+        return system_hash, user_text
+
+    def lookup(self, key) -> str | None:
+        system_hash, user_text = key
+        norm = self._normalize(user_text)
+        now = time.time()
+        with self._lock:
+            self._entries = [e for e in self._entries if now - e["ts"] < self.ttl_seconds]
+            for entry in reversed(self._entries):
+                if entry["system_hash"] != system_hash:
+                    continue
+                ratio = difflib.SequenceMatcher(None, norm, entry["norm"]).ratio()
+                if ratio >= self.threshold:
+                    return entry["content"]
+        return None
+
+    def store(self, key, content: str) -> None:
+        if not content.strip():
+            return
+        system_hash, user_text = key
+        with self._lock:
+            self._entries.append({
+                "system_hash": system_hash,
+                "norm": self._normalize(user_text),
+                "content": content,
+                "ts": time.time(),
+            })
+            if len(self._entries) > self.max_entries:
+                self._entries = self._entries[-self.max_entries:]
+
+
+SEMANTIC_CACHE: SemanticResponseCache | None = None
+
+
+async def _semantic_cache_stream(content: str, request_id: str, model_name: str):
+    """Replay a cached answer in the normal SSE shape."""
+    chunk = {
+        "id": request_id, "object": "chat.completion.chunk",
+        "created": int(time.time()), "model": model_name,
+        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+    }
+    yield f"data: {json.dumps(chunk)}\n\n"
+    final = {
+        "id": request_id, "object": "chat.completion.chunk",
+        "created": int(time.time()), "model": model_name,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(final)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 async def _llama_chat_completions(request: ChatCompletionRequest, messages: list[dict]):
     """Handle chat completions for llama-cpp GGUF models."""
+    cache_key = None
+    if SEMANTIC_CACHE is not None:
+        cache_key = SemanticResponseCache.eligibility_key(request, messages)
+        if cache_key is not None:
+            cached = SEMANTIC_CACHE.lookup(cache_key)
+            if cached is not None:
+                logger.info("Semantic cache hit")
+                cached_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+                if request.stream:
+                    return StreamingResponse(
+                        _semantic_cache_stream(cached, cached_id, request.model),
+                        media_type="text/event-stream")
+                return {
+                    "id": cached_id, "object": "chat.completion",
+                    "created": int(time.time()), "model": request.model,
+                    "choices": [{"index": 0,
+                                 "message": {"role": "assistant", "content": cached},
+                                 "finish_reason": "stop"}],
+                    "usage": {"cached": True},
+                }
     if not LLAMA_INFERENCE_LOCK.acquire(blocking=False):
         raise HTTPException(
             status_code=429,
@@ -272,7 +379,7 @@ async def _llama_chat_completions(request: ChatCompletionRequest, messages: list
 
     if request.stream:
         return StreamingResponse(
-            _llama_stream_response(kwargs, request_id, request.model),
+            _llama_stream_response(kwargs, request_id, request.model, cache_key=cache_key),
             media_type="text/event-stream",
         )
 
@@ -282,6 +389,8 @@ async def _llama_chat_completions(request: ChatCompletionRequest, messages: list
         logger.exception("GGUF chat completion failed")
         raise HTTPException(status_code=500, detail=f"GGUF chat completion failed: {exc}") from exc
     content = completion.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if cache_key is not None and SEMANTIC_CACHE is not None:
+        SEMANTIC_CACHE.store(cache_key, content)
     return {
         "id": request_id,
         "object": "chat.completion",
@@ -298,11 +407,13 @@ async def _llama_chat_completions(request: ChatCompletionRequest, messages: list
     }
 
 
-async def _llama_stream_response(kwargs: dict, request_id: str, model_name: str) -> AsyncGenerator[str, None]:
+async def _llama_stream_response(kwargs: dict, request_id: str, model_name: str,
+                                 cache_key=None) -> AsyncGenerator[str, None]:
     """Stream llama-cpp chunks in OpenAI-compatible SSE format."""
     output: Queue = Queue()
     finished = object()
     cancelled = Event()
+    collected: list[str] = []
 
     def generate() -> None:
         try:
@@ -336,6 +447,7 @@ async def _llama_stream_response(kwargs: dict, request_id: str, model_name: str)
             delta = chunk.get("choices", [{}])[0].get("delta", {})
             content = delta.get("content", "")
             if content:
+                collected.append(content)
                 chunk_data = {
                     "id": request_id,
                     "object": "chat.completion.chunk",
@@ -369,6 +481,9 @@ async def _llama_stream_response(kwargs: dict, request_id: str, model_name: str)
         yield f"data: {json.dumps(error_chunk)}\n\n"
     finally:
         cancelled.set()
+
+    if cache_key is not None and SEMANTIC_CACHE is not None and collected:
+        SEMANTIC_CACHE.store(cache_key, "".join(collected))
 
     final_chunk = {
         "id": request_id,
@@ -475,6 +590,13 @@ def load_model(model_path: str):
         # turn (system prompt + repo map + history). Caching evaluated
         # prefixes means each turn only processes the new suffix — the
         # difference between minutes and seconds per turn on big models.
+        global SEMANTIC_CACHE
+        if os.getenv("NEXCODER_SEMANTIC_CACHE", "1").strip().lower() in {"1", "true", "yes", "on"}:
+            SEMANTIC_CACHE = SemanticResponseCache(
+                threshold=float(os.getenv("NEXCODER_SEMANTIC_CACHE_THRESHOLD", "0.96")),
+                ttl_seconds=float(os.getenv("NEXCODER_SEMANTIC_CACHE_TTL", "1800")))
+            logger.info("Semantic response cache enabled (single-turn requests)")
+
         cache_mb = int(os.getenv("NEXCODER_GGUF_CACHE_MB", "2048"))
         if cache_mb > 0:
             try:
