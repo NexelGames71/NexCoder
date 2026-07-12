@@ -34,6 +34,9 @@ nexcoder-cli = "nexcoder.cli:main"
 [tool.setuptools.packages.find]
 include = ["nexcoder*"]
 
+[tool.pytest.ini_options]
+norecursedirs = ["tests/fixtures", "tests/e2e"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

@@ -148,6 +148,41 @@ class CheckpointManager:
         logger.info(f"Restored {len(restored)} files from checkpoint {checkpoint_id}")
         return {"restored": restored, "checkpoint_id": checkpoint_id}
 
+    def add_file(self, checkpoint_id: str, file_path: str) -> None:
+        """Snapshot one more file into an existing checkpoint.
+
+        No-op when the file is already captured, so the agent loop can call
+        this on every mutation without tracking what the checkpoint holds.
+        A missing file is recorded with ``existed: False`` so restore()
+        deletes it (reverting a file the agent created).
+        """
+        cp_dir = os.path.join(self._checkpoints_dir(), checkpoint_id)
+        manifest_path = os.path.join(cp_dir, "manifest.json")
+        if not os.path.isfile(manifest_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_id}")
+        with open(manifest_path, "r") as f:
+            manifest = json.load(f)
+        abs_path = os.path.abspath(file_path)
+        try:
+            rel_path = os.path.relpath(abs_path, self._root)
+        except ValueError:
+            rel_path = os.path.basename(abs_path)
+        rel_norm = rel_path.replace("\\", "/")
+        if any(item.get("relative") == rel_norm for item in manifest["files"]):
+            return
+        if os.path.isfile(abs_path):
+            dest = os.path.join(cp_dir, rel_path)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(abs_path, dest)
+            entry = {"original": abs_path.replace("\\", "/"), "relative": rel_norm,
+                     "size": os.path.getsize(abs_path), "existed": True, "type": "file"}
+        else:
+            entry = {"original": abs_path.replace("\\", "/"), "relative": rel_norm,
+                     "size": 0, "existed": False, "type": "missing"}
+        manifest["files"].append(entry)
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
     def list_checkpoints(self) -> list[dict[str, Any]]:
         """List all available checkpoints."""
         checkpoints = []
