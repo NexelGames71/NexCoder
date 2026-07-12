@@ -35,6 +35,7 @@ nexcoder/resources/ui/
 # PyInstaller
 *.spec.bak
 dist/
+dist_*/
 build/
 
 # OS
