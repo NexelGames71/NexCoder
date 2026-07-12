@@ -9,12 +9,11 @@ echo.
 
 cd /d "%~dp0"
 
-REM Always prefer NexCoder's own venv; foreign venvs only as a fallback.
-if exist ..\venv\Scripts\activate.bat (
-  call ..\venv\Scripts\activate.bat
-) else if exist C:\nexa\.venv\Scripts\activate.bat (
-  call C:\nexa\.venv\Scripts\activate.bat
-)
+REM Call the venv interpreter directly. Do NOT use activate.bat: this venv
+REM was created on another drive and its activation scripts still point
+REM there, silently switching to a stale CPU-only environment.
+set PYTHON=%~dp0..\venv\Scripts\python.exe
+if not exist "%PYTHON%" set PYTHON=python
 
 if "%NEXCODER_GGUF_MODEL_PATH%"=="" (
   set MODEL_PATH=%~dp0coder\Qwen3-Coder-30B-A3B-Instruct-GGUF\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf
@@ -34,6 +33,6 @@ set NEXCODER_REQUIRE_GPU=1
 
 echo Starting server...
 echo %MODEL_PATH%
-python server.py --port 8002 --model-path "%MODEL_PATH%"
+"%PYTHON%" server.py --port 8002 --model-path "%MODEL_PATH%"
 
 pause
