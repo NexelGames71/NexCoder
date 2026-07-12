@@ -47,6 +47,12 @@ class UiPermissionGate:
     def resolve(self, request_id: str, decision: str) -> None:
         with self._lock:
             entry = self._pending.get(request_id)
+            # The UI answers with the id from the loop's permission_request
+            # event, which differs from this gate's internal id. The loop is
+            # single-threaded, so with exactly one pending request the answer
+            # unambiguously belongs to it.
+            if entry is None and len(self._pending) == 1:
+                entry = next(iter(self._pending.values()))
         if entry is None:
             return
         entry["decision"] = decision

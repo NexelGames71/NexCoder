@@ -480,18 +480,25 @@ class Bridge(QObject):
                 return json.dumps({"success": False, "error": "Agent is already running"})
             project_root = self._require_project_path()
             from nexcoder.agent.agent_runtime_v2 import AgentV2Worker, UiPermissionGate
-            self._agent_v2_gate = UiPermissionGate(
-                on_request=lambda rid, tool, detail: self.agent_event.emit(json.dumps({
-                    "type": "permission_request",
-                    "payload": {"id": rid, "tool": tool, "command": detail}})))
+            # The UI's permission card is driven by the loop's own
+            # permission_request event (relayed below); the gate only blocks.
+            self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
                 project_root, prompt, self._agent_v2_gate, skill_id=skill_id)
-            self._agent_v2_worker.event_json.connect(self.agent_event.emit)
+            # Connect to a real slot, NOT self.agent_event.emit: a bound-signal
+            # callable runs on the worker thread, and QWebChannel silently
+            # drops signals emitted off the owner thread. The slot connection
+            # queues delivery to the main thread first.
+            self._agent_v2_worker.event_json.connect(self._relay_agent_event)
             self._agent_v2_worker.finished_json.connect(self._on_agent_v2_finished)
             self._agent_v2_worker.start()
             return json.dumps({"success": True, "mode": "agent_v2"})
         except Exception as e:
             return slot_error_response(e)
+
+    def _relay_agent_event(self, event_json: str) -> None:
+        """Re-emit agent events from the main thread for QWebChannel."""
+        self.agent_event.emit(event_json)
 
     def _on_agent_v2_finished(self, result_json: str) -> None:
         self.agent_complete.emit(result_json)

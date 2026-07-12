@@ -32,3 +32,23 @@ def test_gate_times_out_to_deny():
 def test_gate_unknown_request_id_is_ignored():
     gate = UiPermissionGate(on_request=lambda *a: None, timeout=0.05)
     gate.resolve("nope", ALLOW)  # must not raise
+
+
+def test_gate_unknown_id_resolves_single_pending_request():
+    # The UI answers with the loop event's id, not the gate's internal id.
+    gate = UiPermissionGate(on_request=lambda *a: None)
+    result_box = {}
+
+    def ask():
+        result_box["decision"] = gate.request(tool="run_command", detail="npm test")
+
+    thread = threading.Thread(target=ask)
+    thread.start()
+    for _ in range(100):
+        with gate._lock:
+            if gate._pending:
+                break
+        threading.Event().wait(0.01)
+    gate.resolve("some-other-id", ALLOW)
+    thread.join(timeout=2)
+    assert result_box["decision"] == ALLOW
