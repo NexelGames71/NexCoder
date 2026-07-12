@@ -38,10 +38,24 @@ def test_todo_write_coerces_plain_strings(tmp_path):
         ("step one", "pending"), ("step two", "pending")]
 
 
-def test_todo_write_rejects_bad_status(tmp_path):
+def test_todo_write_coerces_alternate_shapes(tmp_path):
+    # Models improvise: alternate keys and status vocabulary must not fail.
     belt = build_default_belt()
     ctx = make_ctx(tmp_path, [])
-    result = belt.execute("todo_write", {"todos": [{"content": "x", "status": "done"}]}, ctx)
+    result = belt.execute("todo_write", {"todos": [
+        {"content": "x", "status": "done"},
+        {"task": "y", "status": "doing"},
+        {"title": "z"},
+    ]}, ctx)
+    assert result["success"]
+    assert [(t["content"], t["status"]) for t in ctx.todos] == [
+        ("x", "completed"), ("y", "in_progress"), ("z", "pending")]
+
+
+def test_todo_write_rejects_empty_content(tmp_path):
+    belt = build_default_belt()
+    ctx = make_ctx(tmp_path, [])
+    result = belt.execute("todo_write", {"todos": [{"status": "pending"}]}, ctx)
     assert result["error_code"] == "invalid_args"
 
 

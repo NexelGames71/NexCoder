@@ -8,6 +8,13 @@ from nexcoder.agent.core.events import AgentEvent
 from nexcoder.agent.core.tools.base import ToolBelt, ToolContext, ToolSpec
 
 VALID_STATUSES = {"pending", "in_progress", "completed"}
+# Models improvise vocabulary; coerce instead of failing the whole plan.
+STATUS_ALIASES = {
+    "done": "completed", "complete": "completed", "finished": "completed",
+    "doing": "in_progress", "active": "in_progress", "started": "in_progress",
+    "wip": "in_progress", "todo": "pending", "open": "pending", "new": "pending",
+}
+CONTENT_KEYS = ("content", "task", "title", "description", "text")
 
 
 def todo_write(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -19,12 +26,19 @@ def todo_write(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     for index, item in enumerate(raw):
         if isinstance(item, str):  # small models often send bare strings
             item = {"content": item, "status": "pending"}
-        content = str((item or {}).get("content") or "").strip()
-        status = str((item or {}).get("status") or "pending")
-        if not content or status not in VALID_STATUSES:
+        item = item or {}
+        content = ""
+        for key in CONTENT_KEYS:
+            if str(item.get(key) or "").strip():
+                content = str(item[key]).strip()
+                break
+        status = str(item.get("status") or "pending").strip().lower()
+        status = STATUS_ALIASES.get(status, status)
+        if status not in VALID_STATUSES:
+            status = "pending"
+        if not content:
             return {"success": False, "error_code": "invalid_args",
-                    "error": f"todos[{index}] needs content and status in "
-                             f"{sorted(VALID_STATUSES)}"}
+                    "error": f"todos[{index}] needs a non-empty content field"}
         todos.append({"id": index + 1, "content": content, "status": status})
     ctx.todos = todos
     ctx.emit(AgentEvent("todo_updated", {"todos": todos}))

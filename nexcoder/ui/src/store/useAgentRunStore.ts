@@ -1,18 +1,22 @@
 import { create } from 'zustand';
 
 export interface AgentTodo { id: number; content: string; status: 'pending' | 'in_progress' | 'completed'; }
-export interface AgentStep { tool: string; args?: Record<string, unknown>; success?: boolean; summary?: string; done: boolean; }
 export interface PermissionReq { id: string; tool: string; command: string; }
 export interface AgentEventMsg { type: string; payload: Record<string, any>; ts?: number; }
 
+// Ordered transcript, Codex-style: prose and tool actions interleave in
+// the order they happened instead of living in separate buckets.
+export type TranscriptItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean; success?: boolean; summary?: string };
+
 interface AgentRunState {
   runActive: boolean;
-  steps: AgentStep[];
+  transcript: TranscriptItem[];
   todos: AgentTodo[];
   permission: PermissionReq | null;
   checkpointId: string | null;
   mutatedFiles: string[];
-  streamText: string;
   finalText: string;
   status: string;
   start: () => void;
@@ -21,32 +25,43 @@ interface AgentRunState {
 }
 
 export const useAgentRunStore = create<AgentRunState>((set) => ({
-  runActive: false, steps: [], todos: [], permission: null,
-  checkpointId: null, mutatedFiles: [], streamText: '', finalText: '', status: '',
+  runActive: false, transcript: [], todos: [], permission: null,
+  checkpointId: null, mutatedFiles: [], finalText: '', status: '',
   start: () => set({
-    runActive: true, steps: [], todos: [], permission: null,
-    checkpointId: null, mutatedFiles: [], streamText: '', finalText: '', status: 'running',
+    runActive: true, transcript: [], todos: [], permission: null,
+    checkpointId: null, mutatedFiles: [], finalText: '', status: 'running',
   }),
   reset: () => set({
-    runActive: false, steps: [], todos: [], permission: null,
-    checkpointId: null, mutatedFiles: [], streamText: '', finalText: '', status: '',
+    runActive: false, transcript: [], todos: [], permission: null,
+    checkpointId: null, mutatedFiles: [], finalText: '', status: '',
   }),
   handleEvent: (event) => set((state) => {
     const { type, payload } = event;
     switch (type) {
       case 'run_started': return { runActive: true, status: 'running' };
-      case 'text_delta': return { streamText: state.streamText + (payload.text ?? '') };
+      case 'text_delta': {
+        const transcript = [...state.transcript];
+        const last = transcript[transcript.length - 1];
+        if (last && last.kind === 'text') {
+          transcript[transcript.length - 1] = { kind: 'text', text: last.text + (payload.text ?? '') };
+        } else {
+          transcript.push({ kind: 'text', text: payload.text ?? '' });
+        }
+        return { transcript };
+      }
       case 'tool_started':
-        return { steps: [...state.steps, { tool: payload.tool, args: payload.args, done: false }], streamText: '' };
+        return { transcript: [...state.transcript,
+                 { kind: 'step', tool: payload.tool, args: payload.args, done: false }] };
       case 'tool_result': {
-        const steps = [...state.steps];
-        for (let i = steps.length - 1; i >= 0; i--) {
-          if (!steps[i].done && steps[i].tool === payload.tool) {
-            steps[i] = { ...steps[i], done: true, success: payload.success, summary: payload.summary };
+        const transcript = [...state.transcript];
+        for (let i = transcript.length - 1; i >= 0; i--) {
+          const item = transcript[i];
+          if (item.kind === 'step' && !item.done && item.tool === payload.tool) {
+            transcript[i] = { ...item, done: true, success: payload.success, summary: payload.summary };
             break;
           }
         }
-        return { steps };
+        return { transcript };
       }
       case 'todo_updated': return { todos: payload.todos ?? [] };
       case 'permission_request':
@@ -56,13 +71,21 @@ export const useAgentRunStore = create<AgentRunState>((set) => ({
       case 'edit_applied':
         return state.mutatedFiles.includes(payload.path)
           ? {} : { mutatedFiles: [...state.mutatedFiles, payload.path] };
-      case 'run_completed':
+      case 'run_completed': {
+        // The final text already streamed into the transcript; drop the
+        // trailing text item so it isn't shown twice.
+        const transcript = [...state.transcript];
+        const last = transcript[transcript.length - 1];
+        if (last && last.kind === 'text' && (payload.final_text ?? '').startsWith(last.text.slice(0, 40))) {
+          transcript.pop();
+        }
         return {
           runActive: false, status: payload.status, finalText: payload.final_text ?? '',
-          streamText: '',  // the completed card owns the final text now
+          transcript,
           checkpointId: payload.checkpoint_id ?? state.checkpointId,
           mutatedFiles: payload.mutated_files ?? state.mutatedFiles,
         };
+      }
       case 'run_error': return { runActive: false, status: 'error', finalText: payload.error ?? '' };
       default: return {};
     }
