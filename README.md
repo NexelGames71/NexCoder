@@ -40,7 +40,45 @@ $env:NEXCODER_REQUIRE_GPU = "1"
 $env:NEXCODER_GGUF_GPU_LAYERS = "-1"
 C:\NexCoder\venv\Scripts\python.exe C:\NexCoder\models\server.py --port 8001 --model-path C:\NexCoder\models\coder\Qwen2.5-Coder-7B-Instruct-GGUF\qwen2.5-coder-7b-instruct-q6_k.gguf
 ```
-## CLI Agent
+## CLI Agent (v2 agentic core)
+
+The v2 engine is a Cursor-class agentic loop: it plans with a visible todo
+list, edits files directly (checkpoint-backed revert), asks permission before
+running commands, and verifies its own work.
+
+```powershell
+# Interactive (prompts before each command; [a]lways adds to the allowlist)
+C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --engine v2 --project C:\MyApp "fix the failing test"
+
+# Full auto (no command prompts; risky commands still denied)
+C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --engine v2 --auto --project C:\MyApp "build a landing page"
+```
+
+Configuration (env vars, also read from `.env`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEXA_API_URL` | `http://127.0.0.1:8001` | OpenAI-compatible backend |
+| `NEXA_MODEL` | `default` | Model name sent to the backend |
+| `NEXCODER_ADAPTER` | `xml` | Tool-call transport: `xml` (local GGUF) or `native` (OpenAI function calling) |
+| `NEXA_CONTEXT_WINDOW` | `8192` | Context budget for compaction |
+| `NEXCODER_ENGINE` | `v1` | Default CLI engine |
+
+**GPU-server migration:** point `NEXA_API_URL` at the hosted endpoint and set
+`NEXCODER_ADAPTER=native`. Nothing else changes.
+
+Per-project state lives in `.nexcoder/`: `permissions.json` (command
+allowlist), `checkpoints/` (revert snapshots), `repo_map.json`, `sessions/`,
+`trajectories/`.
+
+Acceptance harnesses (require the local model server):
+
+```powershell
+venv\Scripts\python.exe tests\e2e\run_greenfield.py
+venv\Scripts\python.exe tests\e2e\run_brownfield.py
+```
+
+## CLI Agent (legacy v1)
 
 Run NexCoder's Hermes-style coding agent directly in a terminal:
 

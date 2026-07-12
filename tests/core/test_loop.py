@@ -96,6 +96,35 @@ def test_loop_max_turns(tmp_path):
     assert result["status"] == "max_turns" and result["turns"] == 3
 
 
+def test_loop_nudges_when_no_tool_call_ever_made(tmp_path):
+    # A model that answers in prose without ever touching a tool gets
+    # corrective nudges before the loop accepts a final answer.
+    model = FakeModel([
+        {"role": "assistant", "content": "Here is some code: ```html ... ```"},
+        {"role": "assistant", "content": "Sorry, here it is again as prose."},
+        {"role": "assistant", "content": "final answer after nudges"},
+    ])
+    loop, _ = make_loop(tmp_path, model)
+    result = loop.run("build a page")
+    assert result["status"] == "completed"
+    assert result["final_text"] == "final answer after nudges"
+    assert result["turns"] == 3
+    nudge_request = model.received[1]
+    assert any("tool" in str(m.get("content", "")).lower() and m.get("role") == "user"
+               for m in nudge_request[-1:])
+
+
+def test_loop_no_nudge_after_real_tool_call(tmp_path):
+    (tmp_path / "x.txt").write_text("hi", encoding="utf-8")
+    model = FakeModel([
+        xml_call("read_file", '{"path": "x.txt"}'),
+        {"role": "assistant", "content": "done reading"},
+    ])
+    loop, _ = make_loop(tmp_path, model)
+    result = loop.run("read x")
+    assert result["turns"] == 2 and result["final_text"] == "done reading"
+
+
 def test_loop_todo_state_in_result(tmp_path):
     model = FakeModel([
         xml_call("todo_write",

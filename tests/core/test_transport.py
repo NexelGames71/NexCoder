@@ -24,6 +24,22 @@ def test_adapters_parse_equivalent_calls_identically():
     assert xml_turn.text == native_turn.text == "Reading it now."
 
 
+def test_xml_adapter_parses_qwen_native_format():
+    # Qwen2.5 emits Hermes-style calls: name inside the JSON body.
+    message = {"role": "assistant", "content":
+               'On it.\n<tool_call>\n{"name": "read_file", "arguments": {"path": "app.py"}}\n</tool_call>'}
+    turn = XmlAdapter().parse_assistant_message(message)
+    assert [(c.name, c.args) for c in turn.tool_calls] == [("read_file", {"path": "app.py"})]
+    assert turn.text == "On it."
+
+
+def test_xml_adapter_qwen_format_bad_json_is_parse_error():
+    turn = XmlAdapter().parse_assistant_message(
+        {"role": "assistant", "content": "<tool_call>\n{broken\n</tool_call>"})
+    assert turn.tool_calls == ()
+    assert turn.parse_error
+
+
 def test_xml_adapter_reports_parse_error_not_exception():
     turn = XmlAdapter().parse_assistant_message(
         {"role": "assistant", "content": '<tool_call name="read_file">{bad json</tool_call>'})

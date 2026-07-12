@@ -23,6 +23,16 @@ from nexcoder.agent.trajectory import AgentTrajectoryRecorder
 logger = logging.getLogger(__name__)
 
 MAX_GUARDRAIL_BLOCKS = 6
+MAX_NO_TOOL_NUDGES = 2
+
+NO_TOOL_NUDGE = (
+    "You have not called any tools yet, so nothing has actually happened in "
+    "the project. Printing code in markdown fences does NOT create files. "
+    "Act now by emitting tool calls in this exact format:\n"
+    "<tool_call>\n"
+    '{"name": "write_file", "arguments": {"path": "index.html", "content": "..."}}\n'
+    "</tool_call>"
+)
 
 AGENT_SYSTEM_PROMPT = """You are NexCoder, an autonomous coding agent working \
 inside the user's project.
@@ -137,6 +147,8 @@ class AgentLoop:
         final_text = ""
         blocked_total = 0
         turns_used = 0
+        made_tool_call = False
+        nudges = 0
 
         try:
             for turn in range(1, self.max_turns + 1):
@@ -162,9 +174,15 @@ class AgentLoop:
                     continue
 
                 if not turn_data.tool_calls:
+                    if not made_tool_call and nudges < MAX_NO_TOOL_NUDGES:
+                        nudges += 1
+                        trajectory.record("no_tool_nudge", {"nudge": nudges})
+                        conversation.add({"role": "user", "content": NO_TOOL_NUDGE})
+                        continue
                     final_text = turn_data.text
                     status = "completed"
                     break
+                made_tool_call = True
 
                 results: list[dict[str, Any]] = []
                 for call in turn_data.tool_calls:

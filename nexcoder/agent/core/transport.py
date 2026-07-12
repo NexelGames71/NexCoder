@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any, Protocol
 import uuid
 
@@ -45,6 +46,12 @@ def _new_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:8]}"
 
 
+# Hermes/Qwen-native form: the tool name lives inside the JSON body.
+# Qwen2.5 models are trained on this exact shape, so the XML adapter
+# teaches it in the prompt and accepts it (plus the legacy attribute form).
+QWEN_TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*([\s\S]*?)\s*</tool_call>")
+
+
 class XmlAdapter:
     """Tool calls embedded in assistant text as <tool_call> blocks."""
 
@@ -55,9 +62,13 @@ class XmlAdapter:
         lines = [
             "",
             "# Tools",
-            "Call tools by emitting one or more blocks exactly like:",
-            '<tool_call name="tool_name">{"arg": "value"}</tool_call>',
-            "Arguments must be a single valid JSON object.",
+            "You act by calling tools. Emit each call as a block exactly like:",
+            "<tool_call>",
+            '{"name": "tool_name", "arguments": {"arg": "value"}}',
+            "</tool_call>",
+            "The body must be one valid JSON object with \"name\" and \"arguments\".",
+            "Never print file contents in markdown code fences — create files "
+            "with the write_file tool.",
             "",
             "Available tools:",
         ]
@@ -78,14 +89,44 @@ class XmlAdapter:
 
     def parse_assistant_message(self, message: dict[str, Any]) -> ModelTurn:
         text = str(message.get("content") or "")
+        calls: list[ToolCall] = []
+        parse_error: str | None = None
+
+        # Legacy attribute form: <tool_call name="x">{...}</tool_call>
         try:
-            parsed = parse_tool_calls(text)
+            for item in parse_tool_calls(text):
+                calls.append(ToolCall(id=_new_call_id(), name=item.tool, args=item.args))
         except ToolCallParseError as exc:
-            return ModelTurn(text=strip_tool_calls(text).strip(), parse_error=str(exc))
-        calls = tuple(
-            ToolCall(id=_new_call_id(), name=item.tool, args=item.args)
-            for item in parsed)
-        return ModelTurn(text=strip_tool_calls(text).strip(), tool_calls=calls)
+            parse_error = str(exc)
+        stripped = strip_tool_calls(text)
+
+        # Qwen/Hermes form: <tool_call>{"name": ..., "arguments": {...}}</tool_call>
+        def consume(match: re.Match) -> str:
+            nonlocal parse_error
+            body = match.group(1)
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError as exc:
+                parse_error = parse_error or f"tool_call has invalid JSON: {exc.msg}"
+                return ""
+            name = str((payload or {}).get("name") or "")
+            arguments = (payload or {}).get("arguments")
+            if not name:
+                parse_error = parse_error or "tool_call JSON is missing a name"
+                return ""
+            if arguments is None:
+                arguments = {}
+            if not isinstance(arguments, dict):
+                parse_error = parse_error or f"arguments for {name} must be a JSON object"
+                return ""
+            calls.append(ToolCall(id=_new_call_id(), name=name, args=arguments))
+            return ""
+
+        stripped = QWEN_TOOL_CALL_PATTERN.sub(consume, stripped)
+
+        if parse_error:
+            return ModelTurn(text=stripped.strip(), parse_error=parse_error)
+        return ModelTurn(text=stripped.strip(), tool_calls=tuple(calls))
 
     def tool_result_messages(
         self, calls: list[ToolCall], results: list[dict[str, Any]],
