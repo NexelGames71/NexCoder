@@ -9,8 +9,17 @@ export default function AgentRunPanel() {
 
   if (!runActive && !status) return null;
 
+  const waitingForModel = runActive && steps.length === 0 && !streamText
+    && todos.length === 0 && !permission;
+
   return (
     <div className="agent-run-panel">
+      {waitingForModel && (
+        <div className="agent-waiting">
+          <span className="step-running">…</span>
+          <span>Agent is working — waiting for the model to respond</span>
+        </div>
+      )}
       {todos.length > 0 && (
         <div className="agent-todos">
           {todos.map((todo) => (

@@ -1730,3 +1730,4 @@
 .run-final-text { white-space: pre-wrap; }
 .run-changed-files { display: flex; flex-direction: column; gap: 2px; }
 .changed-file { display: flex; justify-content: space-between; align-items: center; }
+.agent-waiting { display: flex; gap: var(--space-2); align-items: baseline; color: var(--text-secondary); font-style: italic; }
