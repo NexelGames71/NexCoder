@@ -1,6 +1,20 @@
-import { Terminal, FilePenLine, FilePlus2, FileText, Search, FolderOpen, BookOpen, ListChecks, Wrench } from 'lucide-react';
+import { useState } from 'react';
+import { Terminal, FilePenLine, FilePlus2, FileText, Search, FolderOpen, BookOpen, ListChecks, Wrench, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAgentRunStore, TranscriptItem } from '../../store/useAgentRunStore';
 import { agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
+
+function DiffView({ diff }: { diff: string }) {
+  return (
+    <pre className="step-expand diff-view">
+      {diff.split('\n').map((line, i) => {
+        const cls = line.startsWith('+') && !line.startsWith('+++') ? 'diff-add'
+          : line.startsWith('-') && !line.startsWith('---') ? 'diff-del'
+          : line.startsWith('@@') ? 'diff-hunk' : 'diff-ctx';
+        return <div key={i} className={cls}>{line || ' '}</div>;
+      })}
+    </pre>
+  );
+}
 
 // Codex-style row: quiet verb phrase describing the action, not raw tool IO.
 function describeStep(item: Extract<TranscriptItem, { kind: 'step' }>): { icon: any; label: string; detail: string } {
@@ -23,8 +37,15 @@ function describeStep(item: Extract<TranscriptItem, { kind: 'step' }>): { icon: 
 export default function AgentRunPanel() {
   const { transcript, todos, permission, checkpointId, mutatedFiles,
           finalText, status, runActive } = useAgentRunStore();
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   if (!runActive && !status) return null;
+
+  const toggle = (index: number) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(index)) { next.delete(index); } else { next.add(index); }
+    return next;
+  });
 
   return (
     <div className="agent-run">
@@ -48,15 +69,29 @@ export default function AgentRunPanel() {
             : null;
         }
         const { icon: Icon, label, detail } = describeStep(item);
+        const expandable = Boolean((item.output && item.output.length) || item.diff);
+        const isOpen = expanded.has(index);
         return (
-          <div key={index} className={`agent-run-step ${item.done ? (item.success ? 'ok' : 'fail') : 'running'}`}>
-            <Icon size={13} className="step-icon" />
-            <span className="step-label">{label}</span>
-            {detail && <code className="step-detail">{detail}</code>}
-            {item.done && !item.success && item.summary && (
-              <span className="step-error">{item.summary}</span>
+          <div key={index}>
+            <div
+              className={`agent-run-step ${item.done ? (item.success ? 'ok' : 'fail') : 'running'} ${expandable ? 'expandable' : ''}`}
+              onClick={expandable ? () => toggle(index) : undefined}
+            >
+              {expandable
+                ? (isOpen ? <ChevronDown size={12} className="step-chevron" /> : <ChevronRight size={12} className="step-chevron" />)
+                : <span className="step-chevron-spacer" />}
+              <Icon size={13} className="step-icon" />
+              <span className="step-label">{label}</span>
+              {detail && <code className="step-detail">{detail}</code>}
+              {item.done && !item.success && item.summary && (
+                <span className="step-error">{item.summary}</span>
+              )}
+              {!item.done && <span className="step-spinner">…</span>}
+            </div>
+            {isOpen && item.diff && <DiffView diff={item.diff} />}
+            {isOpen && !item.diff && item.output && (
+              <pre className="step-expand">{item.output.join('\n')}</pre>
             )}
-            {!item.done && <span className="step-spinner">…</span>}
           </div>
         );
       })}

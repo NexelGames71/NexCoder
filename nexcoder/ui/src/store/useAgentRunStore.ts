@@ -8,7 +8,12 @@ export interface AgentEventMsg { type: string; payload: Record<string, any>; ts?
 // the order they happened instead of living in separate buckets.
 export type TranscriptItem =
   | { kind: 'text'; text: string }
-  | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean; success?: boolean; summary?: string };
+  | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean;
+      success?: boolean; summary?: string;
+      output?: string[];   // streamed command output lines
+      diff?: string };     // unified diff for file edits
+
+const MAX_OUTPUT_LINES = 500;
 
 interface AgentRunState {
   runActive: boolean;
@@ -63,14 +68,39 @@ export const useAgentRunStore = create<AgentRunState>((set) => ({
         }
         return { transcript };
       }
+      case 'command_output': {
+        const transcript = [...state.transcript];
+        for (let i = transcript.length - 1; i >= 0; i--) {
+          const item = transcript[i];
+          if (item.kind === 'step' && item.tool === 'run_command' && !item.done) {
+            const output = [...(item.output ?? [])];
+            if (output.length < MAX_OUTPUT_LINES) output.push(String(payload.line ?? ''));
+            transcript[i] = { ...item, output };
+            break;
+          }
+        }
+        return { transcript };
+      }
       case 'todo_updated': return { todos: payload.todos ?? [] };
       case 'permission_request':
         return { permission: { id: payload.id, tool: payload.tool, command: payload.command } };
       case 'permission_resolved': return { permission: null };
       case 'checkpoint_created': return { checkpointId: payload.checkpoint_id };
-      case 'edit_applied':
-        return state.mutatedFiles.includes(payload.path)
-          ? {} : { mutatedFiles: [...state.mutatedFiles, payload.path] };
+      case 'edit_applied': {
+        // Attach the diff to the in-flight edit/write step for expansion.
+        const transcript = [...state.transcript];
+        for (let i = transcript.length - 1; i >= 0; i--) {
+          const item = transcript[i];
+          if (item.kind === 'step' && !item.done
+              && (item.tool === 'edit_file' || item.tool === 'write_file')) {
+            transcript[i] = { ...item, diff: String(payload.diff ?? '') };
+            break;
+          }
+        }
+        const mutatedFiles = state.mutatedFiles.includes(payload.path)
+          ? state.mutatedFiles : [...state.mutatedFiles, payload.path];
+        return { transcript, mutatedFiles };
+      }
       case 'run_completed': {
         // The final text already streamed into the transcript; drop the
         // trailing text item so it isn't shown twice.
