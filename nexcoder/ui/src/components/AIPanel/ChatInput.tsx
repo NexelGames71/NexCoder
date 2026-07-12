@@ -6,6 +6,7 @@ import ActiveSkillChip from './ActiveSkillChip';
 
 const MODEL_LABELS: Record<string, string> = {
   'qwen2.5-coder': 'Qwen 3B',
+  'qwen3-coder-30b-a3b-instruct-q4_k_m': 'Qwen3 Coder 30B A3B',
   'qwen2.5-coder-7b-instruct-q6_k': 'Qwen 2.5 Coder 7B Q6',
   'qwen2.5-coder-7b-instruct-q4_k_m': 'Qwen 2.5 Coder 7B',
   'yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF': 'Gemma4 12B',

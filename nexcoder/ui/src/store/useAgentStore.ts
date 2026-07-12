@@ -16,6 +16,7 @@ export interface AgentSettings {
   aiModel: string;
   aiEndpoint: string;
   toolAccess: 'full' | 'read_only';
+  settingsVersion?: number;
 }
 
 interface AgentSettingsState {
@@ -25,13 +26,18 @@ interface AgentSettingsState {
 
 const STORAGE_KEY = 'nexcoder_agent_settings';
 
-// Preferred model for NexCoder agent tasks. Qwen2.5-Coder-7B-Instruct
-// (Q6_K GGUF) is the quality-focused local default for coding and tool use.
-// workflows than the previous default (Gemma 4 12B Agentic), so it
-// is the recommended default for the agent runner.
-export const DEFAULT_AI_MODEL = 'qwen2.5-coder-7b-instruct-q6_k';
-const LEGACY_Q4_MODEL = 'qwen2.5-coder-7b-instruct-q4_k_m';
+// Preferred model for NexCoder agent tasks. Qwen3-Coder-30B-A3B (Q4_K_M
+// GGUF, MoE with 3B active params) is markedly more reliable at agentic
+// tool use than the 7B and still runs locally via partial GPU offload.
+export const DEFAULT_AI_MODEL = 'qwen3-coder-30b-a3b-instruct-q4_k_m';
 export const DEFAULT_AI_ENDPOINT = 'http://127.0.0.1:8001';
+// Settings saved before this version had a 7B model id as the default;
+// they migrate to the 30B once, then user choices stick.
+const SETTINGS_VERSION = 2;
+const LEGACY_DEFAULT_MODELS = new Set([
+  'qwen2.5-coder-7b-instruct-q6_k',
+  'qwen2.5-coder-7b-instruct-q4_k_m',
+]);
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   showAgentTimelineDetails: true,
@@ -41,6 +47,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   aiModel: DEFAULT_AI_MODEL,
   aiEndpoint: DEFAULT_AI_ENDPOINT,
   toolAccess: 'full',
+  settingsVersion: SETTINGS_VERSION,
 };
 
 export const useAgentStore = create<AgentSettingsState>((set) => ({
@@ -49,7 +56,11 @@ export const useAgentStore = create<AgentSettingsState>((set) => ({
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.aiModel === LEGACY_Q4_MODEL) parsed.aiModel = DEFAULT_AI_MODEL;
+        if ((parsed.settingsVersion ?? 1) < SETTINGS_VERSION
+            && LEGACY_DEFAULT_MODELS.has(parsed.aiModel)) {
+          parsed.aiModel = DEFAULT_AI_MODEL;
+        }
+        parsed.settingsVersion = SETTINGS_VERSION;
         return { ...DEFAULT_AGENT_SETTINGS, ...parsed };
       }
       // One-time migration: pull agent fields out of the legacy
@@ -64,7 +75,9 @@ export const useAgentStore = create<AgentSettingsState>((set) => ({
             (migrated as Record<string, unknown>)[key] = parsed[key];
           }
         }
-        if (migrated.aiModel === LEGACY_Q4_MODEL) migrated.aiModel = DEFAULT_AI_MODEL;
+        if (migrated.aiModel && LEGACY_DEFAULT_MODELS.has(migrated.aiModel)) {
+          migrated.aiModel = DEFAULT_AI_MODEL;
+        }
         return { ...DEFAULT_AGENT_SETTINGS, ...migrated };
       }
       return DEFAULT_AGENT_SETTINGS;

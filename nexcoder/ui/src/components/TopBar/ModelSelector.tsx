@@ -2,15 +2,18 @@ import React, { useState } from 'react';
 import { Cpu, ChevronDown } from 'lucide-react';
 import { useAgentStore } from '../../store/useAgentStore';
 
-// Preferred model for NexCoder agent tasks. Qwen2.5-Coder-7B-Instruct
-// Q6_K is the quality-focused local default. Q4_K_M remains available
-// for machines with less free GPU or unified memory.
-const QWEN_CODER_7B = 'qwen2.5-coder-7b-instruct-q6_k';
-
+// Preferred model for NexCoder agent tasks. Qwen3-Coder-30B-A3B is the
+// recommended local default (best agentic reliability); the 7B remains
+// available as the faster low-memory option.
 const MODELS = [
   {
-    id: QWEN_CODER_7B,
-    name: 'Qwen2.5-Coder-7B-Instruct (Q6_K, recommended)',
+    id: 'qwen3-coder-30b-a3b-instruct-q4_k_m',
+    name: 'Qwen3-Coder-30B-A3B (Q4_K_M, recommended)',
+    icon: Cpu,
+  },
+  {
+    id: 'qwen2.5-coder-7b-instruct-q6_k',
+    name: 'Qwen2.5-Coder-7B-Instruct (Q6_K, faster)',
     icon: Cpu,
   },
   {
