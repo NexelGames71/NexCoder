@@ -34,12 +34,13 @@ function describeStep(item: Extract<TranscriptItem, { kind: 'step' }>): { icon: 
   }
 }
 
-export default function AgentRunPanel() {
-  const { transcript, todos, permission, checkpointId, mutatedFiles,
-          finalText, status, runActive } = useAgentRunStore();
+export default function AgentRunPanel({ runId }: { runId: string }) {
+  const run = useAgentRunStore((state) => state.runs[runId]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  if (!runActive && !status) return null;
+  if (!run) return null;
+  const { transcript, todos, permission, checkpointId, mutatedFiles,
+          finalText, status, runActive } = run;
 
   const toggle = (index: number) => setExpanded((prev) => {
     const next = new Set(prev);

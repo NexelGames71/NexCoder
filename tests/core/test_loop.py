@@ -150,6 +150,37 @@ def test_loop_allows_repeated_run_command(tmp_path):
     assert len(ran) == 2 and all(e.payload["success"] for e in ran)
 
 
+def test_loop_retries_truncated_tool_call(tmp_path):
+    # Output cut off mid tool call (max_tokens): re-ask, don't treat as prose.
+    (tmp_path / "a.txt").write_text("hi", encoding="utf-8")
+    model = FakeModel([
+        {"role": "assistant", "content": 'Let me look.\n<tool_call>\n{"name": "read_file'},
+        xml_call("read_file", '{"path": "a.txt"}'),
+        {"role": "assistant", "content": "done"},
+    ])
+    loop, events = make_loop(tmp_path, model)
+    result = loop.run("inspect a.txt")
+    assert result["status"] == "completed"
+    reads = [e for e in events if e.type == "tool_result" and e.payload["tool"] == "read_file"]
+    assert len(reads) == 1 and reads[0].payload["success"]
+    retry_request = model.received[1]
+    assert any("cut off" in str(m.get("content", "")) for m in retry_request[-1:])
+
+
+def test_repeated_read_allowed_after_compaction(tmp_path):
+    # Compaction collapses old tool results; re-reading must become legal.
+    from nexcoder.agent.tool_guardrails import ToolGuardrailController
+    guardrails = ToolGuardrailController()
+    first = guardrails.before_call("read_file", {"path": "a.py"})
+    assert first.allows_execution
+    guardrails.after_call("read_file", {"path": "a.py"}, {"success": True, "content": "x"})
+    blocked = guardrails.before_call("read_file", {"path": "a.py"})
+    assert not blocked.allows_execution
+    guardrails.note_context_compacted()
+    again = guardrails.before_call("read_file", {"path": "a.py"})
+    assert again.allows_execution
+
+
 def test_loop_todo_state_in_result(tmp_path):
     model = FakeModel([
         xml_call("todo_write",

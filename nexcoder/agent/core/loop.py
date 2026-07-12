@@ -188,6 +188,7 @@ class AgentLoop:
         turns_used = 0
         made_tool_call = False
         nudges = 0
+        truncation_retries = 0
 
         try:
             for turn in range(1, self.max_turns + 1):
@@ -196,6 +197,9 @@ class AgentLoop:
 
                 if conversation.needs_compaction():
                     stats = conversation.compact(self._summarize)
+                    # Compacted results are gone from context; the model may
+                    # legitimately need to re-run reads it already made.
+                    guardrails.note_context_compacted()
                     self.emit(AgentEvent("compaction", stats))
 
                 # Stream prose live but suppress tool-call markup; the
@@ -214,6 +218,22 @@ class AgentLoop:
                     conversation.add({"role": "user", "content":
                                       f"Tool call error: {turn_data.parse_error}. "
                                       "Re-emit the call with valid JSON arguments."})
+                    continue
+
+                # Output hit the token cap mid tool call: the raw fragment
+                # parses as neither a call nor sane prose. Ask for a re-emit
+                # instead of accepting the truncated text as an answer.
+                raw_content = str(message.get("content") or "")
+                looks_truncated = (
+                    not turn_data.tool_calls
+                    and ("<tool_call" in raw_content.rsplit("</tool_call>", 1)[-1]
+                         or raw_content.rstrip().endswith('{"name"')))
+                if looks_truncated and truncation_retries < 3:
+                    truncation_retries += 1
+                    trajectory.record("truncated_output", {"retry": truncation_retries})
+                    conversation.add({"role": "user", "content":
+                                      "Your last message was cut off mid tool call. "
+                                      "Re-emit the complete tool call, keeping it short."})
                     continue
 
                 if not turn_data.tool_calls:

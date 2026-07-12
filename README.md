@@ -141,3 +141,5 @@ C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --apply --project C:\Spinner
 By default, `write_file` prepares patch previews and does not write them to disk. Use `--apply` only when you want the CLI to write the prepared patch payloads.
 
 Create a polished responsive static product page. Create index.html, styles.css, script.js, and README.md. Use plain HTML, CSS, and JavaScript only. Include a dark visual system, responsive navigation, three product cards, accessible controls, and a working theme toggle. Do not install packages. Complete every requested file in this run and prepare all changes for review.
+
+venv\Scripts\python.exe -m nexcoder.main

@@ -69,6 +69,12 @@ class ToolGuardrailController:
         self._same_tool_failures: dict[str, int] = {}
         self._idempotent_results: dict[str, tuple[str, int]] = {}
 
+    def note_context_compacted(self) -> None:
+        """Old tool results were compacted out of the model's context, so
+        'use the previous result' is no longer possible: allow re-reads."""
+        self._seen_calls.clear()
+        self._idempotent_results.clear()
+
     def note_mutation(self) -> None:
         """A mutating tool succeeded: the world changed, so commands that
         failed before may legitimately pass now. Reset failure tracking."""

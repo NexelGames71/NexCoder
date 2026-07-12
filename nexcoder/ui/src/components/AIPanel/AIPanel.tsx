@@ -349,7 +349,7 @@ export default function AIPanel() {
             || 'Follow the skill instructions on the current project state.';
         }
       }
-      useAgentRunStore.getState().start();
+      useAgentRunStore.getState().start(userMessage.id);
       try {
         const result = await agentRunV2(task, skillId);
         if (result && result.success === false) {
@@ -443,7 +443,8 @@ export default function AIPanel() {
           <Sparkles size={16} style={{ color: 'var(--accent-purple)' }} />
           <span>NexCoder AI</span>
         </div>
-        <button className="btn btn-ghost btn-icon tooltip" data-tooltip="Clear chat" onClick={clearChat}>
+        <button className="btn btn-ghost btn-icon tooltip" data-tooltip="Clear chat"
+                onClick={() => { clearChat(); useAgentRunStore.getState().reset(); }}>
           <Trash2 size={14} />
         </button>
       </div>
@@ -479,14 +480,17 @@ export default function AIPanel() {
           </div>
         ) : (
           messages.map((msg, index) => (
-            <ChatMessage
-              key={msg.id}
-              message={msg}
-              isLatest={index === messages.length - 1}
-            />
+            <React.Fragment key={msg.id}>
+              <ChatMessage
+                message={msg}
+                isLatest={index === messages.length - 1}
+              />
+              {/* Each agent run renders beneath the prompt that started it,
+                  so earlier responses stay in the conversation history. */}
+              <AgentRunPanel runId={msg.id} />
+            </React.Fragment>
           ))
         )}
-        <AgentRunPanel />
         <div ref={messagesEndRef} />
       </div>
 
