@@ -233,6 +233,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Full auto (v2): skip command permission prompts.",
     )
+    parser.add_argument(
+        "--skill",
+        default=None,
+        help="Preload a skill by id for the v2 run (same as a /skill prompt prefix).",
+    )
     return parser.parse_args(argv)
 
 
@@ -338,12 +343,20 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
     from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
     from nexcoder.agent.core.repo_map import build_repo_map, render_repo_map, save_repo_map
     from nexcoder.agent.core.session_store import SessionStore
+    from nexcoder.agent.core.skills_catalog import render_skills_catalog
+    from nexcoder.agent.core.slash import parse_slash_command
     from nexcoder.agent.core.tools.base import ALLOW, ALLOW_ALWAYS, DENY
     from nexcoder.agent.core.transport import get_adapter
     from nexcoder.agent.model_connector import AgentModelClient, ModelConnector
+    from nexcoder.agent.skills_registry import get_skills
 
     config = load_backend_config()
     adapter_name = args.adapter or config.adapter
+
+    known_ids = {s["id"] for s in get_skills(str(project_root))}
+    skill_id, task = parse_slash_command(prompt, known_ids)
+    if args.skill:
+        skill_id, task = args.skill, prompt
 
     class ConsolePermissionGate:
         def request(self, *, tool: str, detail: str) -> str:
@@ -398,10 +411,11 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
         permission_gate=gate,
         max_turns=50,
         context_window=config.context_window,
-        extra_system=render_repo_map(repo_map),
+        extra_system=(render_repo_map(repo_map) + "\n\n"
+                      + render_skills_catalog(str(project_root))),
         session_store=SessionStore(project_root),
     )
-    result = loop.run(prompt)
+    result = loop.run(task, preload_skill=skill_id)
     print(f"\n--- {result['status']} in {result['turns']} turn(s); "
           f"{len(result['mutated_files'])} file(s) changed ---")
     if result["final_text"]:
