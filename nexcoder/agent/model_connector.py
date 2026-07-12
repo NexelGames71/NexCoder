@@ -259,6 +259,84 @@ class ModelConnector:
                 raise ModelStreamError(f"AI request failed: {exc}") from exc
             return f"Warning: {exc}"
 
+    @staticmethod
+    def merge_stream_chunks(chunks: list[dict]) -> dict:
+        """Aggregate OpenAI streaming chunks into one assistant message."""
+        content_parts: list[str] = []
+        calls: dict[int, dict] = {}
+        for item in chunks:
+            delta = (item.get("choices") or [{}])[0].get("delta") or {}
+            if delta.get("content"):
+                content_parts.append(str(delta["content"]))
+            for fragment in delta.get("tool_calls") or []:
+                index = int(fragment.get("index", 0))
+                slot = calls.setdefault(index, {
+                    "id": "", "type": "function",
+                    "function": {"name": "", "arguments": ""}})
+                if fragment.get("id"):
+                    slot["id"] = fragment["id"]
+                fn = fragment.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+        message: dict = {"role": "assistant", "content": "".join(content_parts)}
+        if calls:
+            message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        return message
+
+    def chat_agent(
+        self,
+        messages: list[dict],
+        *,
+        extras: dict | None = None,
+        on_delta=None,
+        temperature: float = 0.2,
+        max_tokens: int = 3072,
+    ) -> dict:
+        """Agent-loop entry point: full assistant message, exceptions on failure."""
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        payload.update(extras or {})
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        url = f"{self._base_url.rstrip('/')}/v1/chat/completions"
+        chunks: list[dict] = []
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                with client.stream("POST", url, json=payload, headers=headers) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        chunks.append(chunk)
+                        if on_delta:
+                            delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                            if delta.get("content"):
+                                on_delta(str(delta["content"]))
+        except httpx.ConnectError as exc:
+            raise ModelUnavailableError(
+                f"Cannot connect to AI backend at {self._base_url}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise ModelHTTPError(
+                f"AI backend error: HTTP {exc.response.status_code}") from exc
+        except Exception as exc:
+            raise ModelStreamError(f"AI stream interrupted: {exc}") from exc
+        return self.merge_stream_chunks(chunks)
+
     def set_endpoint(self, url: str) -> None:
         """Update the AI endpoint URL."""
         self._base_url = url
@@ -286,3 +364,13 @@ class ModelConnector:
                 return {"connected": False, "error": f"HTTP {response.status_code}"}
         except Exception as exc:
             return {"connected": False, "error": str(exc)}
+
+
+class AgentModelClient:
+    """Adapts ModelConnector to the AgentLoop ModelClient protocol."""
+
+    def __init__(self, connector: ModelConnector) -> None:
+        self.connector = connector
+
+    def complete(self, messages, *, extras, on_delta=None):
+        return self.connector.chat_agent(messages, extras=extras, on_delta=on_delta)
