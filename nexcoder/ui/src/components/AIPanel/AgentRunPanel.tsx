@@ -1,17 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useAgentRunStore } from '../../store/useAgentRunStore';
 import { agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
-
-function useElapsedSeconds(active: boolean): number {
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (!active) { setElapsed(0); return; }
-    const started = Date.now();
-    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return elapsed;
-}
 
 export default function AgentRunPanel() {
   const {
@@ -21,21 +9,8 @@ export default function AgentRunPanel() {
 
   if (!runActive && !status) return null;
 
-  const waitingForModel = runActive && steps.length === 0 && !streamText
-    && todos.length === 0 && !permission;
-  const elapsed = useElapsedSeconds(waitingForModel);
-
   return (
     <div className="agent-run-panel">
-      {waitingForModel && (
-        <div className="agent-waiting">
-          <span className="step-running">…</span>
-          <span>
-            Agent is working — the model is reading the task
-            {elapsed >= 5 ? ` (${elapsed}s — large local models can take a few minutes on the first response)` : ''}
-          </span>
-        </div>
-      )}
       {todos.length > 0 && (
         <div className="agent-todos">
           {todos.map((todo) => (
