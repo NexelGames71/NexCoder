@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import platform
 from typing import Any, Callable, Protocol
 import uuid
 
@@ -120,8 +121,22 @@ class AgentLoop:
         ctx = ToolContext(
             project_root=self.project_root, emit=self.emit,
             permission_gate=self.permission_gate, run_id=run_id)
+        try:
+            # Agent state must never end up in the user's commits.
+            nexcoder_dir = self.project_root / ".nexcoder"
+            nexcoder_dir.mkdir(parents=True, exist_ok=True)
+            ignore = nexcoder_dir / ".gitignore"
+            if not ignore.exists():
+                ignore.write_text("*\n", encoding="utf-8")
+        except OSError:
+            logger.warning("Could not seed .nexcoder/.gitignore", exc_info=True)
+
         schemas = self.belt.schemas()
         system = self.system_prompt
+        if platform.system() == "Windows":
+            system += ("\n\nEnvironment: Windows. run_command uses cmd.exe — "
+                       "use double quotes in commands (single quotes are not "
+                       "quoting), and && to chain.")
         if self.extra_system:
             system += "\n\n" + self.extra_system
         system += self.adapter.system_prompt_suffix(schemas)
@@ -137,7 +152,9 @@ class AgentLoop:
             else:
                 conversation.add({
                     "role": "system",
-                    "content": f"[Skill: {preload_skill}]\n{record['body']}"})
+                    "content": (f"[Skill: {preload_skill}] — workflow guidance, "
+                                "not a tool. Follow it using the available tools.\n"
+                                f"{record['body']}")})
                 ctx.preloaded_skill = preload_skill
         conversation.add({"role": "user", "content": task})
         guardrails = ToolGuardrailController(self.guardrail_config)

@@ -69,7 +69,27 @@ Configuration (env vars, also read from `.env`):
 
 Per-project state lives in `.nexcoder/`: `permissions.json` (command
 allowlist), `checkpoints/` (revert snapshots), `repo_map.json`, `sessions/`,
-`trajectories/`.
+`trajectories/`, and `skills/` (project-local skills).
+
+### Skills
+
+The v2 agent sees a catalog of all skills in its prompt and loads relevant
+ones itself via `load_skill`. You can also invoke a skill directly:
+
+```powershell
+# Slash prefix in the prompt (chat panel or CLI)
+... -m nexcoder.cli "/commit group and commit my changes"
+
+# Or the explicit flag
+... -m nexcoder.cli --skill code-review "review the auth module"
+```
+
+Built-in workflow skills include `commit`, `init`, `code-review`,
+`systematic-debugging`, `verification-before-completion`, and
+`writing-plans`. Projects can add or override skills by creating
+`.nexcoder/skills/<id>/SKILL.md` with `name:` and `description:`
+frontmatter — they appear in the picker under "Project" and take
+precedence over built-ins with the same id.
 
 Acceptance harnesses (require the local model server):
 

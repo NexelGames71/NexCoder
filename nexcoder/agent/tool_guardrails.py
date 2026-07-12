@@ -73,6 +73,20 @@ class ToolGuardrailController:
         signature = tool_signature(tool, args or {})
         seen = self._seen_calls.get(signature, 0)
         if tool in self.config.exempt_repeat_tools:
+            # Re-running a previously *successful* command is the legitimate
+            # verify -> fix -> re-verify loop. Re-running one that already
+            # failed, unchanged, is never productive.
+            if self._failure_counts.get(signature, 0) > 0:
+                return ToolGuardrailDecision(
+                    action="block",
+                    code="repeat_failed_command",
+                    message=(
+                        "This exact command already failed. Change the command "
+                        "(fix quoting, paths, or arguments) instead of retrying it."),
+                    tool=tool,
+                    count=self._failure_counts[signature],
+                    signature=signature,
+                )
             self._seen_calls[signature] = seen + 1
             return ToolGuardrailDecision(tool=tool, count=seen + 1, signature=signature)
         if seen >= self.config.repeated_exact_block_after:

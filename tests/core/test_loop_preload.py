@@ -66,6 +66,33 @@ def test_load_skill_short_circuits_when_preloaded(tmp_path):
     assert "B" * 100 not in tool_response  # body not re-sent
 
 
+def test_run_seeds_nexcoder_gitignore(tmp_path):
+    loop = make_loop(tmp_path, RecordingModel())
+    loop.run("anything")
+    ignore = tmp_path / ".nexcoder" / ".gitignore"
+    assert ignore.read_text(encoding="utf-8").strip() == "*"
+
+
+def test_exempt_tool_repeat_blocked_after_failure(tmp_path):
+    import json as _json
+    # A command that always fails identically must not be re-runnable forever.
+    bad = {"role": "assistant", "content":
+           '<tool_call name="run_command">' + _json.dumps({"command": "definitely-not-a-cmd-xyz"}) + "</tool_call>"}
+    from nexcoder.agent.core.events import AgentEvent
+    events: list[AgentEvent] = []
+    model = type("M", (), {
+        "queue": [bad] * 10,
+        "complete": lambda self, messages, *, extras, on_delta=None:
+            self.queue.pop(0) if self.queue else {"role": "assistant", "content": "done"},
+    })()
+    loop = make_loop(tmp_path, model, events)
+    loop.run("run the bad command")
+    executed = [e for e in events if e.type == "tool_started"]
+    # First run executes and fails; identical retries get blocked quickly
+    # rather than executing 10 times.
+    assert 1 <= len(executed) <= 2
+
+
 def test_load_skill_reads_project_skills(tmp_path):
     make_project_skill(tmp_path, "deploy-widget", body="Widget body.")
     call = {"role": "assistant", "content":

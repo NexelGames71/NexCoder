@@ -15,6 +15,8 @@ Create well-formed git commits from the current working tree.
 5. Confirm with `git log -1 --stat` and report the commit hash and message.
 
 ## Rules
+- Always double-quote the commit message: `git commit -m "feat: add login"`. Single quotes break on Windows.
+- Never stage or commit `.nexcoder/` files — stage specific files, not `git add .`, when agent state is present.
 - Never push. Never use --no-verify, --amend (unless asked), or force flags.
 - Never commit secrets, .env files, or large binaries; if staged, warn and unstage them instead.
 - If there are no changes, say so and stop.
