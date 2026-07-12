@@ -1,11 +1,11 @@
-﻿[build-system]
+[build-system]
 requires = ["setuptools>=69.0", "wheel"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "nexcoder"
 version = "0.1.0"
-description = "NexCoder â€” AI-First Code Editor for the Nexa Ecosystem"
+description = "NexCoder — AI-First Code Editor for the Nexa Ecosystem"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Proprietary"}
