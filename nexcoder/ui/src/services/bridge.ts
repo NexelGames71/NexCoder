@@ -174,6 +174,27 @@ export async function agentReview(prompt: string, context: any): Promise<any> {
   return callBridge('agent_review', prompt, JSON.stringify(context));
 }
 
+// Agent v2 (agentic core engine)
+export async function agentRunV2(prompt: string): Promise<any> {
+  return callBridge('agent_run_v2', prompt);
+}
+
+export async function agentPermissionResponse(requestId: string, decision: 'allow' | 'allow_always' | 'deny'): Promise<any> {
+  return callBridge('agent_permission_response', requestId, decision);
+}
+
+export async function agentRevertRun(checkpointId: string): Promise<any> {
+  return callBridge('agent_revert_run', checkpointId);
+}
+
+export async function agentRevertFile(checkpointId: string, path: string): Promise<any> {
+  return callBridge('agent_revert_file', checkpointId, path);
+}
+
+export function onAgentEvent(callback: (eventJson: string) => void): void {
+  connectSignal('agent_event', callback);
+}
+
 export async function agentApproveDiff(diffId: string): Promise<any> {
   return callBridge('agent_approve_diff', diffId);
 }

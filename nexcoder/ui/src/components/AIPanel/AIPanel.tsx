@@ -7,7 +7,9 @@ import { useAgentStore } from '../../store/useAgentStore';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import SkillPicker from './SkillPicker';
-import { agentAsk, agentEdit, agentRun, agentScan, agentDebug, agentReview, getBridge, fetchSkills } from '../../services/bridge';
+import { agentAsk, agentEdit, agentRunV2, agentScan, agentDebug, agentReview, getBridge, fetchSkills, onAgentEvent } from '../../services/bridge';
+import AgentRunPanel from './AgentRunPanel';
+import { useAgentRunStore } from '../../store/useAgentRunStore';
 import './AIPanel.css';
 
 export default function AIPanel() {
@@ -89,6 +91,15 @@ export default function AIPanel() {
     }
     previousProjectRef.current = projectPath;
   }, [projectPath, clearChat]);
+
+  // ── Agent v2 event stream ──────────────────────────────────────────
+  useEffect(() => {
+    onAgentEvent((eventJson: string) => {
+      try {
+        useAgentRunStore.getState().handleEvent(JSON.parse(eventJson));
+      } catch { /* ignore parse errors */ }
+    });
+  }, []);
 
   // â”€â”€ Load skill catalog from backend on mount â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
@@ -319,6 +330,21 @@ export default function AIPanel() {
     setInput('');
     setStreaming(true);
 
+    // Agent mode runs on the v2 agentic core: events render in
+    // AgentRunPanel, not as a streamed chat message or task card.
+    if (activeMode === 'agent') {
+      activeTaskIdRef.current = null;
+      setShowSkillPicker(false);
+      useAgentRunStore.getState().start();
+      try {
+        await agentRunV2(userMessage.content);
+      } catch (e) {
+        console.error(e);
+        setStreaming(false);
+      }
+      return;
+    }
+
     const assistantMessageId = Math.random().toString();
     addMessage({
       id: assistantMessageId,
@@ -340,7 +366,7 @@ export default function AIPanel() {
       maxToolIterations: settings.maxToolIterations,
     };
 
-    if (activeMode === 'agent' || activeMode === 'edit') {
+    if (activeMode === 'edit') {
       activeTaskIdRef.current = assistantMessageId;
       addTask({
         id: assistantMessageId,
@@ -373,8 +399,6 @@ export default function AIPanel() {
         await agentAsk(userMessage.content, context);
       } else if (activeMode === 'edit') {
         await agentEdit(userMessage.content, context);
-      } else if (activeMode === 'agent') {
-        await agentRun(userMessage.content, context);
       } else if (activeMode === 'debug') {
         await agentDebug(userMessage.content, context);
       } else if (activeMode === 'review') {
@@ -436,6 +460,7 @@ export default function AIPanel() {
             />
           ))
         )}
+        <AgentRunPanel />
         <div ref={messagesEndRef} />
       </div>
 

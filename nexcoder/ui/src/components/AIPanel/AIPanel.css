@@ -1688,3 +1688,45 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Agent v2 run panel ─────────────────────────────────────────── */
+.agent-run-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+}
+.agent-todos { display: flex; flex-direction: column; gap: 2px; }
+.agent-todo { display: flex; gap: var(--space-2); align-items: baseline; }
+.agent-todo-completed { color: var(--text-secondary); text-decoration: line-through; }
+.agent-todo-in_progress { color: var(--accent-purple); }
+.agent-todo-mark { width: 14px; }
+.agent-step { display: flex; gap: var(--space-2); align-items: baseline; }
+.agent-step .step-ok { color: #4ade80; }
+.agent-step .step-fail { color: #f87171; }
+.agent-step .step-running { color: var(--text-secondary); }
+.agent-step .step-tool { font-weight: 600; }
+.agent-step .step-summary { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-stream-text { white-space: pre-wrap; color: var(--text-secondary); }
+.agent-permission-card {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-3); border: 1px solid var(--accent-purple);
+  border-radius: var(--radius-md);
+}
+.agent-permission-card .perm-title { font-weight: 600; }
+.agent-permission-card .perm-command {
+  padding: var(--space-2); background: var(--bg-deep);
+  border-radius: var(--radius-md); word-break: break-all;
+}
+.agent-permission-card .perm-actions { display: flex; gap: var(--space-2); }
+.agent-run-result { display: flex; flex-direction: column; gap: var(--space-2); }
+.run-status { font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+.run-status-completed { color: #4ade80; }
+.run-status-error, .run-status-stalled, .run-status-max_turns { color: #f87171; }
+.run-final-text { white-space: pre-wrap; }
+.run-changed-files { display: flex; flex-direction: column; gap: 2px; }
+.changed-file { display: flex; justify-content: space-between; align-items: center; }
