@@ -93,6 +93,42 @@ def test_exempt_tool_repeat_blocked_after_failure(tmp_path):
     assert 1 <= len(executed) <= 2
 
 
+def test_failed_command_rerunnable_after_successful_edit(tmp_path):
+    # fail pytest -> fix code -> re-run same pytest: must be allowed.
+    import json as _json
+    import sys
+    (tmp_path / "flag.py").write_bytes(b"OK = False\n")
+    check = (f'"{sys.executable}" -c "import flag; import sys; '
+             'sys.exit(0 if flag.OK else 1)"')
+    run = {"role": "assistant", "content":
+           '<tool_call name="run_command">' + _json.dumps({"command": check}) + "</tool_call>"}
+    fix = {"role": "assistant", "content":
+           '<tool_call name="edit_file">' + _json.dumps({
+               "path": "flag.py", "old_string": "OK = False",
+               "new_string": "OK = True"}) + "</tool_call>"}
+    done = {"role": "assistant", "content": "fixed and verified"}
+
+    class Scripted:
+        def __init__(self):
+            self.queue = [run, fix, run, done]
+            self.received = []
+
+        def complete(self, messages, *, extras, on_delta=None):
+            self.received.append(messages)
+            return self.queue.pop(0)
+
+    from nexcoder.agent.core.events import AgentEvent
+    events: list[AgentEvent] = []
+    loop = make_loop(tmp_path, Scripted(), events)
+    result = loop.run("make the check pass")
+    assert result["status"] == "completed"
+    runs = [e for e in events if e.type == "tool_result"
+            and e.payload["tool"] == "run_command"]
+    assert len(runs) == 2
+    assert runs[0].payload["success"] is False
+    assert runs[1].payload["success"] is True
+
+
 def test_load_skill_reads_project_skills(tmp_path):
     make_project_skill(tmp_path, "deploy-widget", body="Widget body.")
     call = {"role": "assistant", "content":

@@ -230,6 +230,12 @@ class AgentLoop:
                         self.emit(AgentEvent("tool_started", {
                             "tool": call.name, "args": call.args, "turn": turn}))
                         result = self.belt.execute(call.name, call.args, ctx)
+                        spec = self.belt.get(call.name)
+                        if (result.get("success") and spec is not None
+                                and spec.mutating):
+                            # The world changed; previously failing commands
+                            # (e.g. the failing test being fixed) may pass now.
+                            guardrails.note_mutation()
                         after = guardrails.after_call(call.name, call.args, result)
                         if after.action == "block":
                             blocked_total += 1

@@ -69,6 +69,12 @@ class ToolGuardrailController:
         self._same_tool_failures: dict[str, int] = {}
         self._idempotent_results: dict[str, tuple[str, int]] = {}
 
+    def note_mutation(self) -> None:
+        """A mutating tool succeeded: the world changed, so commands that
+        failed before may legitimately pass now. Reset failure tracking."""
+        self._failure_counts.clear()
+        self._same_tool_failures.clear()
+
     def before_call(self, tool: str, args: Mapping[str, Any] | None) -> ToolGuardrailDecision:
         signature = tool_signature(tool, args or {})
         seen = self._seen_calls.get(signature, 0)
