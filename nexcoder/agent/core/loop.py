@@ -14,6 +14,7 @@ import uuid
 
 from nexcoder.agent.core.conversation import Conversation
 from nexcoder.agent.core.events import AgentEvent, EventCallback
+from nexcoder.agent.core.session_store import SessionStore
 from nexcoder.agent.core.tools.base import PermissionGate, ToolBelt, ToolContext
 from nexcoder.agent.core.transport import ToolCallAdapter
 from nexcoder.agent.tool_guardrails import ToolGuardrailConfig, ToolGuardrailController
@@ -68,6 +69,7 @@ class AgentLoop:
         extra_system: str = "",
         trajectory_mode: str = "agent",
         guardrail_config: ToolGuardrailConfig | None = None,
+        session_store: SessionStore | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.model = model
@@ -82,6 +84,7 @@ class AgentLoop:
         self.extra_system = extra_system
         self.trajectory_mode = trajectory_mode
         self.guardrail_config = guardrail_config
+        self.session_store = session_store
 
     def _summarize(self, old_messages: list[dict[str, Any]]) -> str:
         transcript = "\n".join(
@@ -117,6 +120,17 @@ class AgentLoop:
         trajectory = AgentTrajectoryRecorder(
             self.project_root, task=task, mode=self.trajectory_mode)
         extras = self.adapter.request_extras(schemas)
+
+        def _persist(current_status: str, turn_number: int) -> None:
+            if self.session_store is None:
+                return
+            try:
+                self.session_store.save(run_id, {
+                    "task": task, "status": current_status,
+                    "messages": conversation.messages(),
+                    "todos": ctx.todos, "turn": turn_number})
+            except Exception:
+                logger.warning("Session persist failed", exc_info=True)
 
         self.emit(AgentEvent("run_started", {"run_id": run_id, "task": task}))
         status = "max_turns"
@@ -181,6 +195,7 @@ class AgentLoop:
                 for result_message in self.adapter.tool_result_messages(
                         list(turn_data.tool_calls), results):
                     conversation.add(result_message)
+                _persist("running", turn)
 
                 if blocked_total >= MAX_GUARDRAIL_BLOCKS:
                     status = "stalled"
@@ -203,6 +218,7 @@ class AgentLoop:
             "todos": ctx.todos,
             "turns": turns_used,
         }
+        _persist(status, turns_used)
         trajectory.finish(status=status, result={
             "final_text": final_text, "mutated_files": result["mutated_files"]})
         self.emit(AgentEvent("run_completed", result))
