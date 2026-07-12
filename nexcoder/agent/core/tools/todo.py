@@ -17,6 +17,8 @@ def todo_write(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
                 "error": "todos must be a non-empty array"}
     todos: list[dict[str, Any]] = []
     for index, item in enumerate(raw):
+        if isinstance(item, str):  # small models often send bare strings
+            item = {"content": item, "status": "pending"}
         content = str((item or {}).get("content") or "").strip()
         status = str((item or {}).get("status") or "pending")
         if not content or status not in VALID_STATUSES:

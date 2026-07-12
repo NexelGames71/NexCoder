@@ -51,6 +51,29 @@ def _new_call_id() -> str:
 # teaches it in the prompt and accepts it (plus the legacy attribute form).
 QWEN_TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*([\s\S]*?)\s*</tool_call>")
 
+# Lenient salvage for small models: a fenced JSON object that has exactly
+# the tool-call shape ({"name": str, "arguments": dict}) is treated as a
+# tool call. Anything else in a fence is left untouched.
+FENCED_JSON_PATTERN = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```")
+
+
+def _fenced_tool_call(body: str) -> tuple[str, dict[str, Any]] | None:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or not set(payload) <= {"name", "arguments"}:
+        return None
+    name = payload.get("name")
+    arguments = payload.get("arguments")
+    if not isinstance(name, str) or not name:
+        return None
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return None
+    return name, arguments
+
 
 class XmlAdapter:
     """Tool calls embedded in assistant text as <tool_call> blocks."""
@@ -123,6 +146,16 @@ class XmlAdapter:
             return ""
 
         stripped = QWEN_TOOL_CALL_PATTERN.sub(consume, stripped)
+
+        def consume_fenced(match: re.Match) -> str:
+            parsed = _fenced_tool_call(match.group(1))
+            if parsed is None:
+                return match.group(0)  # not a tool call — keep the fence
+            name, arguments = parsed
+            calls.append(ToolCall(id=_new_call_id(), name=name, args=arguments))
+            return ""
+
+        stripped = FENCED_JSON_PATTERN.sub(consume_fenced, stripped)
 
         if parse_error:
             return ModelTurn(text=stripped.strip(), parse_error=parse_error)

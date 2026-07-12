@@ -27,6 +27,17 @@ def test_todo_write_updates_context_and_emits(tmp_path):
     assert updated and len(updated[0].payload["todos"]) == 2
 
 
+def test_todo_write_coerces_plain_strings(tmp_path):
+    # Small models often send todos as a bare string array.
+    belt = build_default_belt()
+    events: list[AgentEvent] = []
+    ctx = make_ctx(tmp_path, events)
+    result = belt.execute("todo_write", {"todos": ["step one", "step two"]}, ctx)
+    assert result["success"]
+    assert [(t["content"], t["status"]) for t in ctx.todos] == [
+        ("step one", "pending"), ("step two", "pending")]
+
+
 def test_todo_write_rejects_bad_status(tmp_path):
     belt = build_default_belt()
     ctx = make_ctx(tmp_path, [])

@@ -33,6 +33,26 @@ def test_xml_adapter_parses_qwen_native_format():
     assert turn.text == "On it."
 
 
+def test_xml_adapter_parses_fenced_json_tool_calls():
+    # Small models often wrap tool calls in ```json fences instead of tags.
+    message = {"role": "assistant", "content":
+               '```json\n{"name": "write_file", "arguments": {"path": "a.txt", "content": "hi"}}\n```'
+               '```json\n{"name": "read_file", "arguments": {"path": "a.txt"}}\n```'}
+    turn = XmlAdapter().parse_assistant_message(message)
+    assert [(c.name, c.args) for c in turn.tool_calls] == [
+        ("write_file", {"path": "a.txt", "content": "hi"}),
+        ("read_file", {"path": "a.txt"})]
+    assert turn.text == ""
+
+
+def test_xml_adapter_ignores_fenced_json_that_is_not_a_tool_call():
+    message = {"role": "assistant", "content":
+               'Here is your config:\n```json\n{"port": 8001, "debug": false}\n```'}
+    turn = XmlAdapter().parse_assistant_message(message)
+    assert turn.tool_calls == ()
+    assert "port" in turn.text  # content preserved, not swallowed
+
+
 def test_xml_adapter_qwen_format_bad_json_is_parse_error():
     turn = XmlAdapter().parse_assistant_message(
         {"role": "assistant", "content": "<tool_call>\n{broken\n</tool_call>"})
