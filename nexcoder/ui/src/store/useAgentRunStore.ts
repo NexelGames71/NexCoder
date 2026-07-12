@@ -59,6 +59,7 @@ export const useAgentRunStore = create<AgentRunState>((set) => ({
       case 'run_completed':
         return {
           runActive: false, status: payload.status, finalText: payload.final_text ?? '',
+          streamText: '',  // the completed card owns the final text now
           checkpointId: payload.checkpoint_id ?? state.checkpointId,
           mutatedFiles: payload.mutated_files ?? state.mutatedFiles,
         };

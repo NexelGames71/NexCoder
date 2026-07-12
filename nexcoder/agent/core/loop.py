@@ -16,6 +16,7 @@ import uuid
 from nexcoder.agent.core.conversation import Conversation
 from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.core.session_store import SessionStore
+from nexcoder.agent.core.stream_gate import StreamGate
 from nexcoder.agent.core.tools.base import PermissionGate, ToolBelt, ToolContext
 from nexcoder.agent.core.transport import ToolCallAdapter
 from nexcoder.agent.tool_guardrails import ToolGuardrailConfig, ToolGuardrailController
@@ -197,10 +198,14 @@ class AgentLoop:
                     stats = conversation.compact(self._summarize)
                     self.emit(AgentEvent("compaction", stats))
 
+                # Stream prose live but suppress tool-call markup; the
+                # parsed calls surface as tool_started/tool_result events.
+                gate = StreamGate(lambda text, _turn=turn: self.emit(
+                    AgentEvent("text_delta", {"text": text, "turn": _turn})))
                 message = self.model.complete(
                     conversation.payload_messages(), extras=extras,
-                    on_delta=lambda delta: self.emit(
-                        AgentEvent("text_delta", {"text": delta, "turn": turn})))
+                    on_delta=gate.push)
+                gate.flush()
                 conversation.add(message)
                 turn_data = self.adapter.parse_assistant_message(message)
 
