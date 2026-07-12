@@ -9,10 +9,11 @@ echo.
 
 cd /d "%~dp0"
 
-if exist C:\nexa\.venv\Scripts\activate.bat (
-  call C:\nexa\.venv\Scripts\activate.bat
-) else if exist ..\venv\Scripts\activate.bat (
+REM Always prefer NexCoder's own venv; foreign venvs only as a fallback.
+if exist ..\venv\Scripts\activate.bat (
   call ..\venv\Scripts\activate.bat
+) else if exist C:\nexa\.venv\Scripts\activate.bat (
+  call C:\nexa\.venv\Scripts\activate.bat
 )
 
 if "%NEXCODER_GGUF_MODEL_PATH%"=="" (
