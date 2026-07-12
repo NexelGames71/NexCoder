@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from nexcoder.agent.path_filters import has_skipped_part
+from nexcoder.agent.core.walk import iter_project_files
 
 MAX_FILES = 400
 MAX_SYMBOLS = 20
@@ -49,13 +49,10 @@ def _js_symbols(text: str) -> list[str]:
 def build_repo_map(project_root: str | Path) -> dict[str, Any]:
     root = Path(project_root).resolve()
     files: list[dict[str, Any]] = []
-    for path in sorted(root.rglob("*")):
+    for path in iter_project_files(root):
         if len(files) >= MAX_FILES:
             break
-        relative_parts = path.relative_to(root).parts
-        if has_skipped_part(relative_parts):
-            continue
-        if not path.is_file() or path.suffix.lower() not in SOURCE_EXTENSIONS:
+        if path.suffix.lower() not in SOURCE_EXTENSIONS:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")

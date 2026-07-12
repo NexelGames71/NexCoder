@@ -219,7 +219,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--engine",
         choices=["v1", "v2"],
-        default=os.getenv("NEXCODER_ENGINE", "v1"),
+        default=os.getenv("NEXCODER_ENGINE", "v2"),
         help="Agent engine: v1 (legacy Hermes loop) or v2 (agentic core).",
     )
     parser.add_argument(

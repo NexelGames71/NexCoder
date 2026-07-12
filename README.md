@@ -62,7 +62,7 @@ Configuration (env vars, also read from `.env`):
 | `NEXA_MODEL` | `default` | Model name sent to the backend |
 | `NEXCODER_ADAPTER` | `xml` | Tool-call transport: `xml` (local GGUF) or `native` (OpenAI function calling) |
 | `NEXA_CONTEXT_WINDOW` | `8192` | Context budget for compaction |
-| `NEXCODER_ENGINE` | `v1` | Default CLI engine |
+| `NEXCODER_ENGINE` | `v2` | Default CLI engine (`v1` = legacy Hermes loop) |
 
 **GPU-server migration:** point `NEXA_API_URL` at the hosted endpoint and set
 `NEXCODER_ADAPTER=native`. Nothing else changes.

@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from nexcoder.agent.core.tools.base import ToolBelt, ToolContext, ToolSpec
-from nexcoder.agent.path_filters import has_skipped_part
+from nexcoder.agent.core.walk import iter_project_files
 
 TEXT_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".md",
                    ".json", ".toml", ".txt", ".css", ".html", ".yaml", ".yml"}
@@ -39,12 +39,7 @@ def glob_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         return {"success": False, "error_code": "blocked",
                 "error": "Search path is outside the project or missing"}
     matches: list[tuple[float, str]] = []
-    for path in root.rglob("*"):
-        relative_parts = path.relative_to(ctx.project_root).parts
-        if has_skipped_part(relative_parts):
-            continue
-        if not path.is_file():
-            continue
+    for path in iter_project_files(root):
         relative = path.relative_to(root).as_posix()
         if _matches(relative, path.name, pattern):
             try:
@@ -74,10 +69,8 @@ def grep_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     name_glob = str(args.get("glob") or "")
     cap = int(args.get("max_results") or GREP_DEFAULT_CAP)
     results: list[dict[str, Any]] = []
-    for path in root.rglob("*"):
-        if has_skipped_part(path.relative_to(ctx.project_root).parts):
-            continue
-        if not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS:
+    for path in iter_project_files(root):
+        if path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
         if name_glob and not fnmatch.fnmatch(path.name, name_glob):
             continue
