@@ -27,7 +27,7 @@ if "%NEXCODER_GGUF_CHAT_FORMAT%"=="" (
 
 REM 30B MoE (3B active) with an 8GB card: offload what fits, rest on CPU.
 REM Raise GPU_LAYERS if you have VRAM headroom; lower it on OOM.
-if "%NEXCODER_GGUF_GPU_LAYERS%"=="" set NEXCODER_GGUF_GPU_LAYERS=14
+if "%NEXCODER_GGUF_GPU_LAYERS%"=="" set NEXCODER_GGUF_GPU_LAYERS=8
 if "%NEXCODER_GGUF_CTX%"=="" set NEXCODER_GGUF_CTX=16384
 set NEXCODER_REQUIRE_GPU=1
 
