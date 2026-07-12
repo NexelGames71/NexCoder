@@ -15,6 +15,7 @@ from nexcoder.agent.core.loop import AGENT_SYSTEM_PROMPT, AgentLoop
 from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
 from nexcoder.agent.core.repo_map import build_repo_map, render_repo_map, save_repo_map
 from nexcoder.agent.core.session_store import SessionStore
+from nexcoder.agent.core.skills_catalog import render_skills_catalog
 from nexcoder.agent.core.tools.base import DENY
 from nexcoder.agent.core.transport import get_adapter
 from nexcoder.agent.model_connector import AgentModelClient, ModelConnector
@@ -57,12 +58,14 @@ class AgentV2Worker(QThread):
     finished_json = Signal(str)
 
     def __init__(self, project_root: str, prompt: str,
-                 gate: UiPermissionGate, full_auto: bool = False) -> None:
+                 gate: UiPermissionGate, full_auto: bool = False,
+                 skill_id: str = "") -> None:
         super().__init__()
         self._project_root = project_root
         self._prompt = prompt
         self._gate = gate
         self._full_auto = full_auto
+        self._skill_id = skill_id
 
     def run(self) -> None:
         try:
@@ -82,10 +85,11 @@ class AgentV2Worker(QThread):
                 permission_gate=permission_gate,
                 max_turns=50,
                 context_window=config.context_window,
-                extra_system=render_repo_map(repo_map),
+                extra_system=(render_repo_map(repo_map) + "\n\n"
+                              + render_skills_catalog(self._project_root)),
                 session_store=SessionStore(self._project_root),
             )
-            result = loop.run(self._prompt)
+            result = loop.run(self._prompt, preload_skill=self._skill_id or None)
         except Exception as exc:  # worker must never crash the app
             result = {"success": False, "status": "error", "final_text": str(exc),
                       "run_id": "", "checkpoint_id": None, "mutated_files": [],

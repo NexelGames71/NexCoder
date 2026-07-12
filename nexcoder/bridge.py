@@ -472,8 +472,8 @@ class Bridge(QObject):
         except Exception as e:
             return slot_error_response(e)
 
-    @Slot(str, result=str)
-    def agent_run_v2(self, prompt: str) -> str:
+    @Slot(str, str, result=str)
+    def agent_run_v2(self, prompt: str, skill_id: str = "") -> str:
         """v2 agentic engine: direct edits with checkpoints, gated commands."""
         try:
             if self._agent_v2_worker is not None and self._agent_v2_worker.isRunning():
@@ -484,7 +484,8 @@ class Bridge(QObject):
                 on_request=lambda rid, tool, detail: self.agent_event.emit(json.dumps({
                     "type": "permission_request",
                     "payload": {"id": rid, "tool": tool, "command": detail}})))
-            self._agent_v2_worker = AgentV2Worker(project_root, prompt, self._agent_v2_gate)
+            self._agent_v2_worker = AgentV2Worker(
+                project_root, prompt, self._agent_v2_gate, skill_id=skill_id)
             self._agent_v2_worker.event_json.connect(self.agent_event.emit)
             self._agent_v2_worker.finished_json.connect(self._on_agent_v2_finished)
             self._agent_v2_worker.start()
@@ -668,7 +669,7 @@ class Bridge(QObject):
         """Return list of available agent skills with metadata, grouped by category."""
         try:
             from nexcoder.agent.skills_registry import get_skills_grouped
-            return json.dumps({"success": True, **get_skills_grouped()})
+            return json.dumps({"success": True, **get_skills_grouped(self._current_project_path)})
         except Exception as e:
             return slot_error_response(e)
 
@@ -677,7 +678,7 @@ class Bridge(QObject):
         """Return the SKILL.md body content for a specific skill id."""
         try:
             from nexcoder.agent.skills_registry import get_skill_body
-            record = get_skill_body(skill_id)
+            record = get_skill_body(skill_id, self._current_project_path)
             if record is None:
                 return slot_error_response(
                     LookupError(f"Unknown skill: {skill_id}"),

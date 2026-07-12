@@ -335,9 +335,23 @@ export default function AIPanel() {
     if (activeMode === 'agent') {
       activeTaskIdRef.current = null;
       setShowSkillPicker(false);
+      // Slash command (/commit fix the bug) wins; otherwise the picker's
+      // active skill preloads. Unknown /xyz passes through as plain text.
+      const knownIds = new Set(useChatStore.getState().skills.map((s) => s.id));
+      let task = userMessage.content;
+      let skillId = activeSkill || '';
+      const trimmed = task.trim();
+      if (trimmed.startsWith('/')) {
+        const [first, ...rest] = trimmed.slice(1).split(' ');
+        if (knownIds.has(first)) {
+          skillId = first;
+          task = rest.join(' ').trim()
+            || 'Follow the skill instructions on the current project state.';
+        }
+      }
       useAgentRunStore.getState().start();
       try {
-        await agentRunV2(userMessage.content);
+        await agentRunV2(task, skillId);
       } catch (e) {
         console.error(e);
         setStreaming(false);
