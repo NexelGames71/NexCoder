@@ -25,8 +25,8 @@ def test_catalog_truncates_at_budget(tmp_path):
     assert "[more skills omitted]" in text
 
 
-def test_description_capped_at_90_chars(tmp_path):
+def test_description_capped(tmp_path):
     make_project_skill(tmp_path, "wordy", description="d" * 300)
     text = render_skills_catalog(str(tmp_path))
     line = next(l for l in text.splitlines() if l.startswith("- wordy"))
-    assert len(line) <= len("- wordy — ") + 90
+    assert len(line) <= len("- wordy — ") + 60

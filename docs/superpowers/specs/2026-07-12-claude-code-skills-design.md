@@ -56,7 +56,8 @@ New module `nexcoder/agent/core/skills_catalog.py`:
   - ...
   ```
 
-- One line per skill: `- {id} — {description[:90]}`. Project skills first,
+- One line per skill: `- {id} — {description[:60]}` (60-char cap and a
+  900-token default budget so all built-ins fit). Project skills first,
   then built-ins alphabetically. Output truncates at `token_budget * 3`
   chars with a `[more skills omitted]` marker.
 - The CLI v2 runner and `AgentV2Worker` append the catalog to the loop's

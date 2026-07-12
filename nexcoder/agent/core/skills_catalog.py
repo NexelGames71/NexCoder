@@ -9,11 +9,11 @@ HEADER = (
     "Load a skill with load_skill when the task matches its purpose, "
     "then follow it.")
 TRUNCATION_MARKER = "[more skills omitted]"
-DESCRIPTION_CAP = 90
+DESCRIPTION_CAP = 60
 
 
 def render_skills_catalog(project_root: str | None = None,
-                          token_budget: int = 800) -> str:
+                          token_budget: int = 900) -> str:
     skills = get_skills(project_root)
     project = sorted((s for s in skills if s["category"] == "project"),
                      key=lambda s: s["id"])
