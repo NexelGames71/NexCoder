@@ -451,14 +451,37 @@ def load_model(model_path: str):
             GPU_OFFLOAD_AVAILABLE,
             n_gpu_layers,
         )
-        model = Llama(
+        llama_kwargs: dict = dict(
             model_path=model_path,
             n_ctx=n_ctx,
             n_gpu_layers=n_gpu_layers,
             n_threads=threads,
             chat_format=os.getenv("NEXCODER_GGUF_CHAT_FORMAT", "chatml"),
             verbose=False,
+            # Larger batch = faster prompt processing (agent prompts are long).
+            n_batch=int(os.getenv("NEXCODER_GGUF_N_BATCH", "1024")),
         )
+        if os.getenv("NEXCODER_GGUF_FLASH_ATTN", "0").strip().lower() in {"1", "true", "yes", "on"}:
+            llama_kwargs["flash_attn"] = True
+        try:
+            model = Llama(**llama_kwargs)
+        except TypeError:
+            # Older llama-cpp-python without one of the tuning kwargs.
+            llama_kwargs.pop("flash_attn", None)
+            llama_kwargs.pop("n_batch", None)
+            model = Llama(**llama_kwargs)
+
+        # Prompt cache: agent loops resend the same growing prefix every
+        # turn (system prompt + repo map + history). Caching evaluated
+        # prefixes means each turn only processes the new suffix — the
+        # difference between minutes and seconds per turn on big models.
+        cache_mb = int(os.getenv("NEXCODER_GGUF_CACHE_MB", "2048"))
+        if cache_mb > 0:
+            try:
+                model.set_cache(llama_cpp.LlamaRAMCache(capacity_bytes=cache_mb * 1024 * 1024))
+                logger.info("Prompt cache enabled: %d MB RAM", cache_mb)
+            except Exception as exc:
+                logger.warning("Prompt cache unavailable: %s", exc)
         tokenizer = None
         MODEL_KIND = "gguf"
         MODEL_NAME = os.path.basename(model_path)

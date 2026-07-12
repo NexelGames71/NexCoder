@@ -29,6 +29,10 @@ REM 30B MoE (3B active) with an 8GB card: offload what fits, rest on CPU.
 REM Raise GPU_LAYERS if you have VRAM headroom; lower it on OOM.
 if "%NEXCODER_GGUF_GPU_LAYERS%"=="" set NEXCODER_GGUF_GPU_LAYERS=8
 if "%NEXCODER_GGUF_CTX%"=="" set NEXCODER_GGUF_CTX=16384
+REM Speed: bigger prompt batches + RAM prompt-cache (turn N only evaluates
+REM the new suffix instead of the whole history).
+if "%NEXCODER_GGUF_N_BATCH%"=="" set NEXCODER_GGUF_N_BATCH=1024
+if "%NEXCODER_GGUF_CACHE_MB%"=="" set NEXCODER_GGUF_CACHE_MB=2048
 set NEXCODER_REQUIRE_GPU=1
 
 echo Starting server...
