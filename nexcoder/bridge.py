@@ -6,7 +6,7 @@ import logging
 import tempfile
 from typing import Any, Optional
 
-from PySide6.QtCore import QObject, Slot, Signal
+from PySide6.QtCore import QObject, Qt, Slot, Signal
 
 from nexcoder.agent.errors import ErrorEnvelope, envelope_from_exception
 
@@ -485,21 +485,25 @@ class Bridge(QObject):
             self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
                 project_root, prompt, self._agent_v2_gate, skill_id=skill_id)
-            # Connect to a real slot, NOT self.agent_event.emit: a bound-signal
-            # callable runs on the worker thread, and QWebChannel silently
-            # drops signals emitted off the owner thread. The slot connection
-            # queues delivery to the main thread first.
-            self._agent_v2_worker.event_json.connect(self._relay_agent_event)
-            self._agent_v2_worker.finished_json.connect(self._on_agent_v2_finished)
+            # Explicitly queued to real @Slot methods: PySide connects plain
+            # Python callables as DIRECT connections, which would run the
+            # relay on the worker thread — and QWebChannel silently drops
+            # (and can crash on) signals emitted off the owner thread.
+            self._agent_v2_worker.event_json.connect(
+                self._relay_agent_event, Qt.ConnectionType.QueuedConnection)
+            self._agent_v2_worker.finished_json.connect(
+                self._on_agent_v2_finished, Qt.ConnectionType.QueuedConnection)
             self._agent_v2_worker.start()
             return json.dumps({"success": True, "mode": "agent_v2"})
         except Exception as e:
             return slot_error_response(e)
 
+    @Slot(str)
     def _relay_agent_event(self, event_json: str) -> None:
         """Re-emit agent events from the main thread for QWebChannel."""
         self.agent_event.emit(event_json)
 
+    @Slot(str)
     def _on_agent_v2_finished(self, result_json: str) -> None:
         self.agent_complete.emit(result_json)
         try:
