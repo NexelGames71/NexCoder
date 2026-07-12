@@ -45,6 +45,26 @@ def test_xml_adapter_parses_fenced_json_tool_calls():
     assert turn.text == ""
 
 
+def test_xml_adapter_parses_bare_json_tool_calls():
+    # Worst case: raw JSON objects with no markup at all, run together.
+    message = {"role": "assistant", "content":
+               '{"name": "run_command", "arguments": {"command": "pytest -q"}}'
+               '{"name": "read_file", "arguments": {"path": "calc.py"}}'}
+    turn = XmlAdapter().parse_assistant_message(message)
+    assert [(c.name, c.args) for c in turn.tool_calls] == [
+        ("run_command", {"command": "pytest -q"}),
+        ("read_file", {"path": "calc.py"})]
+    assert turn.text == ""
+
+
+def test_xml_adapter_keeps_bare_json_that_is_not_a_tool_call():
+    message = {"role": "assistant", "content":
+               'The config is {"port": 8001} as requested.'}
+    turn = XmlAdapter().parse_assistant_message(message)
+    assert turn.tool_calls == ()
+    assert '{"port": 8001}' in turn.text
+
+
 def test_xml_adapter_ignores_fenced_json_that_is_not_a_tool_call():
     message = {"role": "assistant", "content":
                'Here is your config:\n```json\n{"port": 8001, "debug": false}\n```'}

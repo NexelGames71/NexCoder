@@ -57,11 +57,8 @@ QWEN_TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*([\s\S]*?)\s*</tool_call>")
 FENCED_JSON_PATTERN = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```")
 
 
-def _fenced_tool_call(body: str) -> tuple[str, dict[str, Any]] | None:
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return None
+def _tool_call_shape(payload: Any) -> tuple[str, dict[str, Any]] | None:
+    """Return (name, args) when payload is exactly tool-call shaped."""
     if not isinstance(payload, dict) or not set(payload) <= {"name", "arguments"}:
         return None
     name = payload.get("name")
@@ -73,6 +70,39 @@ def _fenced_tool_call(body: str) -> tuple[str, dict[str, Any]] | None:
     if not isinstance(arguments, dict):
         return None
     return name, arguments
+
+
+def _fenced_tool_call(body: str) -> tuple[str, dict[str, Any]] | None:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    return _tool_call_shape(payload)
+
+
+def _extract_bare_json_calls(text: str, calls: list[ToolCall]) -> str:
+    """Consume unmarked top-level JSON objects that are tool-call shaped."""
+    decoder = json.JSONDecoder()
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] == "{":
+            try:
+                payload, end = decoder.raw_decode(text, index)
+            except json.JSONDecodeError:
+                out.append(text[index])
+                index += 1
+                continue
+            shaped = _tool_call_shape(payload)
+            if shaped is not None:
+                calls.append(ToolCall(id=_new_call_id(), name=shaped[0], args=shaped[1]))
+            else:
+                out.append(text[index:end])
+            index = end
+            continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
 
 
 class XmlAdapter:
@@ -156,6 +186,7 @@ class XmlAdapter:
             return ""
 
         stripped = FENCED_JSON_PATTERN.sub(consume_fenced, stripped)
+        stripped = _extract_bare_json_calls(stripped, calls)
 
         if parse_error:
             return ModelTurn(text=stripped.strip(), parse_error=parse_error)
