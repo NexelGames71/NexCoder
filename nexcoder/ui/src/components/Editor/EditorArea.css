@@ -1,0 +1,168 @@
+.editor-area-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-deep);
+  position: relative;
+  overflow: hidden;
+}
+
+.editor-groups {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-groups.horizontal {
+  flex-direction: row;
+}
+
+.editor-groups.vertical {
+  flex-direction: column;
+}
+
+.editor-group {
+  flex: 1;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.editor-group:last-child {
+  border-right: none;
+}
+
+.editor-groups.vertical .editor-group {
+  min-width: 0;
+  min-height: 180px;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.editor-groups.vertical .editor-group:last-child {
+  border-bottom: none;
+}
+
+.editor-group.active .editor-tabs-bar {
+  border-bottom-color: var(--accent-purple);
+}
+
+.editor-group-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.editor-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--tab-height);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.editor-tabs-list {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  height: 100%;
+  flex: 1;
+}
+
+.editor-tabs-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  flex-shrink: 0;
+}
+
+.editor-tabs-list::-webkit-scrollbar {
+  height: 0;
+}
+
+.editor-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border-right: 1px solid var(--border-subtle);
+  position: relative;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.editor-tab-btn:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.editor-tab-btn.active {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+
+.editor-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-purple);
+}
+
+.editor-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--transition-fast);
+}
+
+.editor-tab-btn:hover .editor-tab-close {
+  opacity: 1;
+}
+
+.editor-tab-close:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+/* Welcome screen features */
+.welcome-card {
+  padding: var(--space-4);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: all var(--transition-fast);
+}
+
+.welcome-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-purple);
+  box-shadow: var(--shadow-glow);
+}

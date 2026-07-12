@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# NexCoder local data
+.nexcoder/
+
+# Node / React frontend
+nexcoder/ui/node_modules/
+nexcoder/ui/dist/
+nexcoder/resources/ui/
+
+# PyInstaller
+*.spec.bak
+dist/
+build/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Logs
+*.log
+
+# Model weights
+*.gguf
+models/coder/
+
+# Agent e2e scratch folders
+agent-e2e-*/
+agent-plan-e2e*/
