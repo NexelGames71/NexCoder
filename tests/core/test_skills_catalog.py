@@ -1,5 +1,6 @@
+from skill_helpers import make_project_skill
+
 from nexcoder.agent.core.skills_catalog import render_skills_catalog
-from tests.core.test_skills_registry_project import make_project_skill
 
 
 def test_catalog_lists_skills_with_header():
