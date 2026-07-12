@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from typing import Any, Generator
 
 import httpx
@@ -285,6 +286,14 @@ class ModelConnector:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
         return message
 
+    # Local single-slot servers return 429 while another request runs.
+    # The agent path queues politely instead of failing the whole run.
+    BUSY_RETRY_SECONDS = 10.0
+    BUSY_RETRY_LIMIT = 90  # up to 15 minutes of queueing
+    # Prompt processing on big local models can be silent for minutes
+    # before the first SSE byte; the read timeout must survive that.
+    AGENT_READ_TIMEOUT = 900.0
+
     def chat_agent(
         self,
         messages: list[dict],
@@ -307,35 +316,46 @@ class ModelConnector:
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         url = f"{self._base_url.rstrip('/')}/v1/chat/completions"
-        chunks: list[dict] = []
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                with client.stream("POST", url, json=payload, headers=headers) as response:
-                    response.raise_for_status()
-                    for line in response.iter_lines():
-                        if not line or not line.startswith("data: "):
-                            continue
-                        data = line[6:]
-                        if data.strip() == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        chunks.append(chunk)
-                        if on_delta:
-                            delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
-                            if delta.get("content"):
-                                on_delta(str(delta["content"]))
-        except httpx.ConnectError as exc:
-            raise ModelUnavailableError(
-                f"Cannot connect to AI backend at {self._base_url}") from exc
-        except httpx.HTTPStatusError as exc:
-            raise ModelHTTPError(
-                f"AI backend error: HTTP {exc.response.status_code}") from exc
-        except Exception as exc:
-            raise ModelStreamError(f"AI stream interrupted: {exc}") from exc
-        return self.merge_stream_chunks(chunks)
+        timeout = httpx.Timeout(
+            connect=10.0, read=self.AGENT_READ_TIMEOUT, write=60.0, pool=30.0)
+        attempts = 0
+        while True:
+            chunks: list[dict] = []
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    with client.stream("POST", url, json=payload, headers=headers) as response:
+                        response.raise_for_status()
+                        for line in response.iter_lines():
+                            if not line or not line.startswith("data: "):
+                                continue
+                            data = line[6:]
+                            if data.strip() == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            chunks.append(chunk)
+                            if on_delta:
+                                delta = (chunk.get("choices") or [{}])[0].get("delta") or {}
+                                if delta.get("content"):
+                                    on_delta(str(delta["content"]))
+            except httpx.ConnectError as exc:
+                raise ModelUnavailableError(
+                    f"Cannot connect to AI backend at {self._base_url}") from exc
+            except httpx.HTTPStatusError as exc:
+                if (exc.response.status_code == 429
+                        and attempts < self.BUSY_RETRY_LIMIT):
+                    attempts += 1
+                    logger.info("Model busy (429); retry %d in %.0fs",
+                                attempts, self.BUSY_RETRY_SECONDS)
+                    time.sleep(self.BUSY_RETRY_SECONDS)
+                    continue
+                raise ModelHTTPError(
+                    f"AI backend error: HTTP {exc.response.status_code}") from exc
+            except Exception as exc:
+                raise ModelStreamError(f"AI stream interrupted: {exc}") from exc
+            return self.merge_stream_chunks(chunks)
 
     def set_endpoint(self, url: str) -> None:
         """Update the AI endpoint URL."""
