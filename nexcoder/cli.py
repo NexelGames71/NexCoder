@@ -216,6 +216,23 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Optional active file path to include in task context.",
     )
+    parser.add_argument(
+        "--engine",
+        choices=["v1", "v2"],
+        default=os.getenv("NEXCODER_ENGINE", "v1"),
+        help="Agent engine: v1 (legacy Hermes loop) or v2 (agentic core).",
+    )
+    parser.add_argument(
+        "--adapter",
+        choices=["xml", "native"],
+        default=None,
+        help="Tool-call transport for v2. Defaults to NEXCODER_ADAPTER env (xml).",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Full auto (v2): skip command permission prompts.",
+    )
     return parser.parse_args(argv)
 
 
@@ -312,6 +329,86 @@ def safe_apply_diffs(project_root: Path, diffs: list[dict[str, Any]]) -> list[Pa
     return applied
 
 
+def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
+           renderer: ConsoleRenderer) -> int:
+    """Run the v2 agentic core engine (direct edits, permission-gated commands)."""
+    from nexcoder.agent.core.backend_config import load_backend_config
+    from nexcoder.agent.core.belt_factory import build_default_belt
+    from nexcoder.agent.core.loop import AGENT_SYSTEM_PROMPT, AgentLoop
+    from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
+    from nexcoder.agent.core.repo_map import build_repo_map, render_repo_map, save_repo_map
+    from nexcoder.agent.core.session_store import SessionStore
+    from nexcoder.agent.core.tools.base import ALLOW, ALLOW_ALWAYS, DENY
+    from nexcoder.agent.core.transport import get_adapter
+    from nexcoder.agent.model_connector import AgentModelClient, ModelConnector
+
+    config = load_backend_config()
+    adapter_name = args.adapter or config.adapter
+
+    class ConsolePermissionGate:
+        def request(self, *, tool: str, detail: str) -> str:
+            print(f"\n[permission] {tool}: {detail}")
+            answer = input("Allow? [y]es / [a]lways / [n]o: ").strip().lower()
+            if answer in {"a", "always"}:
+                return ALLOW_ALWAYS
+            if answer in {"y", "yes"}:
+                return ALLOW
+            return DENY
+
+    class DenyGate:
+        def request(self, *, tool: str, detail: str) -> str:
+            return DENY
+
+    if args.auto:
+        gate = FullAutoGate()
+    elif args.jsonl:
+        gate = AllowlistGate(DenyGate(), project_root)  # unattended: never hang
+    else:
+        gate = AllowlistGate(ConsolePermissionGate(), project_root)
+
+    repo_map = build_repo_map(project_root)
+    save_repo_map(project_root, repo_map)
+
+    def emit(event) -> None:
+        if args.jsonl:
+            renderer.event(event.type, event.payload)
+            return
+        if event.type == "text_delta":
+            print(event.payload.get("text", ""), end="", flush=True)
+        elif event.type == "tool_started":
+            print(f"\n> {event.payload['tool']} "
+                  f"{json.dumps(event.payload.get('args', {}))[:160]}")
+        elif event.type == "tool_result":
+            marker = "ok" if event.payload.get("success") else "FAIL"
+            print(f"  [{marker}] {event.payload.get('summary', '')}")
+        elif event.type == "command_output":
+            print(f"  | {event.payload.get('line', '')}")
+        elif event.type == "todo_updated":
+            for todo in event.payload.get("todos", []):
+                mark = {"pending": " ", "in_progress": ">", "completed": "x"}[todo["status"]]
+                print(f"  [{mark}] {todo['content']}")
+
+    loop = AgentLoop(
+        project_root=project_root,
+        model=AgentModelClient(ModelConnector()),
+        adapter=get_adapter(adapter_name),
+        belt=build_default_belt(),
+        system_prompt=AGENT_SYSTEM_PROMPT,
+        emit=emit,
+        permission_gate=gate,
+        max_turns=50,
+        context_window=config.context_window,
+        extra_system=render_repo_map(repo_map),
+        session_store=SessionStore(project_root),
+    )
+    result = loop.run(prompt)
+    print(f"\n--- {result['status']} in {result['turns']} turn(s); "
+          f"{len(result['mutated_files'])} file(s) changed ---")
+    if result["final_text"]:
+        print(result["final_text"])
+    return 0 if result["success"] else 1
+
+
 def run_cli(argv: list[str] | None = None) -> int:
     configure_stdio()
     args = parse_args(argv or sys.argv[1:])
@@ -324,6 +421,13 @@ def run_cli(argv: list[str] | None = None) -> int:
 
     renderer = ConsoleRenderer(verbose=args.verbose, jsonl=args.jsonl)
     renderer.header(prompt, project_root, args.mode)
+
+    if args.engine == "v2":
+        try:
+            return run_v2(args, prompt, project_root, renderer)
+        except Exception as exc:
+            renderer.error(exc)
+            return 1
 
     context: dict[str, Any] = {
         "project_path": str(project_root),
