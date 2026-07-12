@@ -7,6 +7,12 @@ category: quality
 
 Create well-formed git commits from the current working tree.
 
+THE MESSAGE FORMAT IS MANDATORY: `type: summary` or `type(scope): summary`,
+where type is exactly one of feat, fix, docs, refactor, test, chore.
+Correct: `fix(greet): default the name parameter`. Wrong: `Commit the changes`,
+`Update greet.py`, `Changes to greet.py`. Derive the type and summary from
+what the DIFF shows, never from how the user phrased the request.
+
 ## Process
 1. Run `git status` and `git diff` (and `git diff --cached`) with run_command to see every change.
 2. Group related changes. If unrelated changes are mixed, commit them separately (`git add <specific files>` per group).
