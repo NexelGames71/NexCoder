@@ -96,22 +96,33 @@ def test_loop_max_turns(tmp_path):
     assert result["status"] == "max_turns" and result["turns"] == 3
 
 
-def test_loop_nudges_when_no_tool_call_ever_made(tmp_path):
-    # A model that answers in prose without ever touching a tool gets
-    # corrective nudges before the loop accepts a final answer.
+def test_loop_nudges_only_when_code_fences_replace_tool_calls(tmp_path):
+    # Printing code in fences instead of acting gets a corrective nudge...
     model = FakeModel([
         {"role": "assistant", "content": "Here is some code: ```html ... ```"},
-        {"role": "assistant", "content": "Sorry, here it is again as prose."},
-        {"role": "assistant", "content": "final answer after nudges"},
+        {"role": "assistant", "content": "Understood, nothing to write."},
     ])
     loop, _ = make_loop(tmp_path, model)
     result = loop.run("build a page")
     assert result["status"] == "completed"
-    assert result["final_text"] == "final answer after nudges"
-    assert result["turns"] == 3
+    assert result["final_text"] == "Understood, nothing to write."
+    assert result["turns"] == 2
     nudge_request = model.received[1]
     assert any("tool" in str(m.get("content", "")).lower() and m.get("role") == "user"
                for m in nudge_request[-1:])
+
+
+def test_loop_accepts_conversational_reply_without_nudging(tmp_path):
+    # "hello" deserves a greeting, not an unsolicited index.html.
+    model = FakeModel([
+        {"role": "assistant", "content": "Hi! Tell me what you'd like to build."},
+    ])
+    loop, _ = make_loop(tmp_path, model)
+    result = loop.run("hello")
+    assert result["status"] == "completed"
+    assert result["turns"] == 1
+    assert result["final_text"] == "Hi! Tell me what you'd like to build."
+    assert result["mutated_files"] == []
 
 
 def test_loop_no_nudge_after_real_tool_call(tmp_path):

@@ -39,6 +39,9 @@ AGENT_SYSTEM_PROMPT = """You are NexCoder, an autonomous coding agent working \
 inside the user's project.
 
 How you work:
+0. Only act when the user gives you an actual task. Greetings, questions, \
+and casual conversation get a direct plain-text reply — no tool calls, no \
+files created, nothing changed. Never invent work the user did not ask for.
 1. On non-trivial tasks, call todo_write first with your plan, and keep \
 statuses current as you complete each step.
 2. Inspect before you change: use glob/grep/read_file to find and understand \
@@ -209,7 +212,14 @@ class AgentLoop:
                     continue
 
                 if not turn_data.tool_calls:
-                    if not made_tool_call and nudges < MAX_NO_TOOL_NUDGES:
+                    # Only nudge when the model printed code fences instead of
+                    # acting — that's the failure the nudge exists for. Plain
+                    # prose with no tool calls is a legitimate direct answer
+                    # (greetings, questions); forcing tools there makes the
+                    # agent invent work the user never asked for.
+                    printed_code_instead = "```" in turn_data.text
+                    if (not made_tool_call and printed_code_instead
+                            and nudges < MAX_NO_TOOL_NUDGES):
                         nudges += 1
                         trajectory.record("no_tool_nudge", {"nudge": nudges})
                         conversation.add({"role": "user", "content": NO_TOOL_NUDGE})
