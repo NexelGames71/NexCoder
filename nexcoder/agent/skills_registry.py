@@ -129,9 +129,7 @@ SKILL_CATEGORY_OVERRIDES: dict[str, str] = {
     "using-agent-skills": "meta",
     # Quality
     "test-driven-development": "quality",
-    "code-review-and-quality": "quality",
     "code-simplification": "quality",
-    "debugging-and-error-recovery": "quality",
     "git-workflow-and-versioning": "quality",
     "observability-and-instrumentation": "quality",
     # Frontend
@@ -154,9 +152,13 @@ SKILL_CATEGORY_OVERRIDES: dict[str, str] = {
 # overrides. Falls back to a neutral icon for skills without one.
 SKILL_ICON_OVERRIDES: dict[str, str] = {
     "test-driven-development": "FlaskConical",
-    "code-review-and-quality": "ClipboardCheck",
     "code-simplification": "Sparkles",
-    "debugging-and-error-recovery": "Bug",
+    "commit": "GitCommit",
+    "init": "FileText",
+    "code-review": "ClipboardCheck",
+    "systematic-debugging": "Bug",
+    "verification-before-completion": "CheckCircle2",
+    "writing-plans": "ListChecks",
     "git-workflow-and-versioning": "GitBranch",
     "frontend-ui-engineering": "Layout",
     "browser-testing-with-devtools": "Monitor",
