@@ -115,7 +115,7 @@ class AgentLoop:
             logger.warning("Compaction summarizer failed: %s", exc)
             return "(summary unavailable)"
 
-    def run(self, task: str) -> dict[str, Any]:
+    def run(self, task: str, *, preload_skill: str | None = None) -> dict[str, Any]:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         ctx = ToolContext(
             project_root=self.project_root, emit=self.emit,
@@ -128,6 +128,17 @@ class AgentLoop:
         conversation = Conversation(
             system, context_window=self.context_window,
             reserve_output=self.reserve_output)
+        preload_warning = ""
+        if preload_skill:
+            from nexcoder.agent.skills_registry import get_skill_body
+            record = get_skill_body(preload_skill, str(self.project_root))
+            if record is None:
+                preload_warning = f"Unknown skill: {preload_skill}"
+            else:
+                conversation.add({
+                    "role": "system",
+                    "content": f"[Skill: {preload_skill}]\n{record['body']}"})
+                ctx.preloaded_skill = preload_skill
         conversation.add({"role": "user", "content": task})
         guardrails = ToolGuardrailController(self.guardrail_config)
         trajectory = AgentTrajectoryRecorder(
@@ -145,7 +156,10 @@ class AgentLoop:
             except Exception:
                 logger.warning("Session persist failed", exc_info=True)
 
-        self.emit(AgentEvent("run_started", {"run_id": run_id, "task": task}))
+        started_payload: dict[str, Any] = {"run_id": run_id, "task": task}
+        if preload_warning:
+            started_payload["preload_warning"] = preload_warning
+        self.emit(AgentEvent("run_started", started_payload))
         status = "max_turns"
         final_text = ""
         blocked_total = 0

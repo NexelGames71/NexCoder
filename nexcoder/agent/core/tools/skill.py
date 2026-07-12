@@ -12,7 +12,9 @@ MAX_BODY = 12000
 
 def load_skill(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     skill_id = str(args.get("id") or "").strip()
-    record = get_skill_body(skill_id) if skill_id else None
+    if skill_id and skill_id == getattr(ctx, "preloaded_skill", None):
+        return {"success": True, "message": "Skill already loaded in context"}
+    record = get_skill_body(skill_id, str(ctx.project_root)) if skill_id else None
     if record is None:
         return {"success": False, "error_code": "skill_not_found",
                 "error": f"Unknown skill: {skill_id}"}

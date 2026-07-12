@@ -47,6 +47,7 @@ class ToolContext:
         self.checkpoint_id: str | None = None
         self.mutated_files: set[str] = set()
         self.todos: list[dict[str, Any]] = []
+        self.preloaded_skill: str | None = None
 
     def resolve(self, target: str) -> Path | None:
         """Resolve a project-relative path; None when it escapes the root."""
