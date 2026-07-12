@@ -39,6 +39,10 @@ class ToolGuardrailConfig:
     no_progress_block_after: int = 3
     idempotent_tools: frozenset[str] = field(default_factory=lambda: IDEMPOTENT_TOOLS)
     mutating_tools: frozenset[str] = field(default_factory=lambda: MUTATING_TOOLS)
+    # Tools whose exact repeats are legitimate because the world changes
+    # between calls (e.g. re-running tests after a fix). They skip the
+    # repeated-exact-call block but keep failure tracking.
+    exempt_repeat_tools: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,9 @@ class ToolGuardrailController:
     def before_call(self, tool: str, args: Mapping[str, Any] | None) -> ToolGuardrailDecision:
         signature = tool_signature(tool, args or {})
         seen = self._seen_calls.get(signature, 0)
+        if tool in self.config.exempt_repeat_tools:
+            self._seen_calls[signature] = seen + 1
+            return ToolGuardrailDecision(tool=tool, count=seen + 1, signature=signature)
         if seen >= self.config.repeated_exact_block_after:
             return ToolGuardrailDecision(
                 action="block",

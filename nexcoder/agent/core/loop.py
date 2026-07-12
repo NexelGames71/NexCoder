@@ -93,7 +93,10 @@ class AgentLoop:
         self.reserve_output = reserve_output
         self.extra_system = extra_system
         self.trajectory_mode = trajectory_mode
-        self.guardrail_config = guardrail_config
+        # Re-running the same command is the verify -> fix -> re-verify loop,
+        # not a stuck agent; exempt it from exact-repeat blocking by default.
+        self.guardrail_config = guardrail_config or ToolGuardrailConfig(
+            exempt_repeat_tools=frozenset({"run_command"}))
         self.session_store = session_store
 
     def _summarize(self, old_messages: list[dict[str, Any]]) -> str:

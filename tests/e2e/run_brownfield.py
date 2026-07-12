@@ -10,9 +10,11 @@ import tempfile
 from pathlib import Path
 
 FIXTURE = Path(__file__).parent / "fixtures" / "brownfield"
-PROMPT = ("The test suite is failing. Run 'python -m pytest -q' to see the "
-          "failure, find the bug, fix it with edit_file, and re-run the tests "
-          "until they pass.")
+# Use this interpreter explicitly: bare "python" in a temp dir resolves to
+# whatever is on PATH, which may not have pytest.
+PROMPT = (f"The test suite is failing. Run '\"{sys.executable}\" -m pytest -q' "
+          "to see the failure, find the bug, fix it with edit_file, and re-run "
+          "the tests until they pass.")
 
 
 def main() -> int:

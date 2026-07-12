@@ -125,6 +125,20 @@ def test_loop_no_nudge_after_real_tool_call(tmp_path):
     assert result["turns"] == 2 and result["final_text"] == "done reading"
 
 
+def test_loop_allows_repeated_run_command(tmp_path):
+    # verify -> fix -> re-verify: the same command must be runnable twice.
+    import json
+    import sys
+    command = f'"{sys.executable}" -c "print(1)"'
+    call = xml_call("run_command", json.dumps({"command": command}))
+    model = FakeModel([call, call, {"role": "assistant", "content": "verified twice"}])
+    loop, events = make_loop(tmp_path, model)
+    result = loop.run("run it twice")
+    assert result["status"] == "completed"
+    ran = [e for e in events if e.type == "tool_result" and e.payload["tool"] == "run_command"]
+    assert len(ran) == 2 and all(e.payload["success"] for e in ran)
+
+
 def test_loop_todo_state_in_result(tmp_path):
     model = FakeModel([
         xml_call("todo_write",
