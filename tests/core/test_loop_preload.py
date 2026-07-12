@@ -32,16 +32,18 @@ def make_loop(tmp_path, model, events=None):
         emit=(events.append if events is not None else None))
 
 
-def test_preload_injects_skill_system_message(tmp_path):
+def test_preload_injects_skill_into_first_system_message(tmp_path):
+    # Must be inside message[0]: chatml formatters drop later system messages.
     make_project_skill(tmp_path, "deploy-widget", body="Step 1: widgetize.")
     model = RecordingModel()
     loop = make_loop(tmp_path, model)
     loop.run("ship it", preload_skill="deploy-widget")
     first_request = model.received[0]
-    assert first_request[1]["role"] == "system"
-    assert "[Skill: deploy-widget]" in first_request[1]["content"]
-    assert "widgetize" in first_request[1]["content"]
-    assert first_request[2]["role"] == "user"
+    assert first_request[0]["role"] == "system"
+    assert "[Skill: deploy-widget]" in first_request[0]["content"]
+    assert "widgetize" in first_request[0]["content"]
+    assert first_request[1]["role"] == "user"
+    assert sum(1 for m in first_request if m["role"] == "system") == 1
 
 
 def test_preload_unknown_skill_warns_and_proceeds(tmp_path):

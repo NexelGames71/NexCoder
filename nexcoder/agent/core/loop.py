@@ -139,10 +139,9 @@ class AgentLoop:
                        "quoting), and && to chain.")
         if self.extra_system:
             system += "\n\n" + self.extra_system
-        system += self.adapter.system_prompt_suffix(schemas)
-        conversation = Conversation(
-            system, context_window=self.context_window,
-            reserve_output=self.reserve_output)
+        # The preloaded skill must live INSIDE the first system message:
+        # several chat-template formatters (llama-cpp-python chatml among
+        # them) silently drop every system message after the first.
         preload_warning = ""
         if preload_skill:
             from nexcoder.agent.skills_registry import get_skill_body
@@ -150,12 +149,14 @@ class AgentLoop:
             if record is None:
                 preload_warning = f"Unknown skill: {preload_skill}"
             else:
-                conversation.add({
-                    "role": "system",
-                    "content": (f"[Skill: {preload_skill}] — workflow guidance, "
-                                "not a tool. Follow it using the available tools.\n"
-                                f"{record['body']}")})
+                system += (f"\n\n[Skill: {preload_skill}] — workflow guidance, "
+                           "not a tool. Follow it using the available tools.\n"
+                           f"{record['body']}")
                 ctx.preloaded_skill = preload_skill
+        system += self.adapter.system_prompt_suffix(schemas)
+        conversation = Conversation(
+            system, context_window=self.context_window,
+            reserve_output=self.reserve_output)
         conversation.add({"role": "user", "content": task})
         guardrails = ToolGuardrailController(self.guardrail_config)
         trajectory = AgentTrajectoryRecorder(
