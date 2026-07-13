@@ -40,6 +40,8 @@ interface AgentRunState {
   // One run per user message id; old runs stay visible in the chat flow.
   runs: Record<string, AgentRun>;
   activeRunId: string | null;
+  // Latest usage across runs — feeds the persistent composer meter.
+  lastContextUsage: ContextUsage | null;
   start: (runId: string) => void;
   handleEvent: (event: AgentEventMsg) => void;
   reset: () => void;
@@ -138,6 +140,7 @@ function applyEvent(run: AgentRun, event: AgentEventMsg): AgentRun {
 export const useAgentRunStore = create<AgentRunState>((set) => ({
   runs: {},
   activeRunId: null,
+  lastContextUsage: null,
   start: (runId) => set((state) => ({
     runs: { ...state.runs, [runId]: emptyRun() },
     activeRunId: runId,
@@ -145,7 +148,17 @@ export const useAgentRunStore = create<AgentRunState>((set) => ({
   handleEvent: (event) => set((state) => {
     const id = state.activeRunId;
     if (!id || !state.runs[id]) return {};
-    return { runs: { ...state.runs, [id]: applyEvent(state.runs[id], event) } };
+    const updated: Partial<AgentRunState> = {
+      runs: { ...state.runs, [id]: applyEvent(state.runs[id], event) },
+    };
+    if (event.type === 'context_usage') {
+      updated.lastContextUsage = {
+        tokens: event.payload.tokens ?? 0,
+        budget: event.payload.budget ?? 0,
+        percent: event.payload.percent ?? 0,
+      };
+    }
+    return updated;
   }),
-  reset: () => set({ runs: {}, activeRunId: null }),
+  reset: () => set({ runs: {}, activeRunId: null, lastContextUsage: null }),
 }));

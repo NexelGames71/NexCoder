@@ -58,7 +58,7 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
 
   if (!run) return null;
   const { transcript, todos, permission, checkpointId, mutatedFiles,
-          finalText, status, runActive, contextUsage } = run;
+          finalText, status, runActive } = run;
 
   const toggle = (index: number) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -135,19 +135,6 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
       {runActive && (
         <div className="agent-run-stop">
           <button className="btn btn-ghost" onClick={() => agentCancelV2()}>■ Stop</button>
-          {contextUsage && (
-            <div className="context-meter" title="Estimated context usage; compaction runs automatically near the limit">
-              <div className="context-meter-bar">
-                <div
-                  className={`context-meter-fill ${contextUsage.percent > 85 ? 'hot' : contextUsage.percent > 60 ? 'warm' : ''}`}
-                  style={{ width: `${Math.min(100, contextUsage.percent)}%` }}
-                />
-              </div>
-              <span className="context-meter-label">
-                ~{(contextUsage.tokens / 1000).toFixed(1)}k / {(contextUsage.budget / 1000).toFixed(0)}k tokens ({contextUsage.percent}%)
-              </span>
-            </div>
-          )}
         </div>
       )}
 

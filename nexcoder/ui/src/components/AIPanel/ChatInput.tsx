@@ -2,6 +2,7 @@ import React, { KeyboardEvent, ChangeEvent } from 'react';
 import { Send, Plus, Cpu, ShieldCheck, Eye } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { useAgentStore } from '../../store/useAgentStore';
+import { useAgentRunStore } from '../../store/useAgentRunStore';
 import ActiveSkillChip from './ActiveSkillChip';
 
 const MODEL_LABELS: Record<string, string> = {
@@ -23,6 +24,7 @@ interface ChatInputProps {
 export default function ChatInput({ input, onChange, onSend, onOpenSkillPicker, skillFilter }: ChatInputProps) {
   const { isStreaming, activeMode } = useChatStore();
   const { settings, updateSetting } = useAgentStore();
+  const contextUsage = useAgentRunStore((state) => state.lastContextUsage);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -115,6 +117,21 @@ export default function ChatInput({ input, onChange, onSend, onOpenSkillPicker, 
             </button>
           </div>
         </div>
+
+        {contextUsage && (
+          <div className="composer-context-meter"
+               title="Estimated context usage of the last agent turn; compaction runs automatically near the limit">
+            <div className="context-meter-bar">
+              <div
+                className={`context-meter-fill ${contextUsage.percent > 85 ? 'hot' : contextUsage.percent > 60 ? 'warm' : ''}`}
+                style={{ width: `${Math.min(100, contextUsage.percent)}%` }}
+              />
+            </div>
+            <span className="context-meter-label">
+              context ~{(contextUsage.tokens / 1000).toFixed(1)}k / {(contextUsage.budget / 1000).toFixed(0)}k ({contextUsage.percent}%)
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
