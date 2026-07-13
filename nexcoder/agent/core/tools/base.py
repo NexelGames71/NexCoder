@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from nexcoder.agent.cancellation import CancellationToken
 from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.safety import SafetyChecker
 from nexcoder.services.checkpoint import CheckpointManager
@@ -37,6 +38,7 @@ class ToolContext:
         safety: SafetyChecker | None = None,
         permission_gate: PermissionGate | None = None,
         run_id: str = "",
+        cancel_token: CancellationToken | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.emit = emit
@@ -44,6 +46,7 @@ class ToolContext:
         self.safety = safety or SafetyChecker()
         self.permission_gate = permission_gate or AllowAllGate()
         self.run_id = run_id
+        self.cancel_token = cancel_token
         self.checkpoint_id: str | None = None
         self.mutated_files: set[str] = set()
         self.todos: list[dict[str, Any]] = []

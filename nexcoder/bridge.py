@@ -513,6 +513,18 @@ class Bridge(QObject):
         except Exception:
             pass
 
+    @Slot(result=str)
+    def agent_cancel_v2(self) -> str:
+        worker = self._agent_v2_worker
+        if worker is None or not worker.isRunning():
+            return json.dumps({"success": False, "error": "No agent run active"})
+        worker.cancel()
+        # A run blocked on a permission prompt must also unblock.
+        if self._agent_v2_gate is not None:
+            from nexcoder.agent.core.tools.base import DENY
+            self._agent_v2_gate.resolve("cancel-all", DENY)
+        return json.dumps({"success": True})
+
     @Slot(str, str, result=str)
     def agent_permission_response(self, request_id: str, decision: str) -> str:
         if self._agent_v2_gate is not None:

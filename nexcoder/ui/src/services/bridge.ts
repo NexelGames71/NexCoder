@@ -183,6 +183,10 @@ export async function agentPermissionResponse(requestId: string, decision: 'allo
   return callBridge('agent_permission_response', requestId, decision);
 }
 
+export async function agentCancelV2(): Promise<any> {
+  return callBridge('agent_cancel_v2');
+}
+
 export async function agentRevertRun(checkpointId: string): Promise<any> {
   return callBridge('agent_revert_run', checkpointId);
 }

@@ -78,6 +78,14 @@ def run_command(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
 
     deadline = time.monotonic() + timeout
     while proc.poll() is None:
+        if ctx.cancel_token is not None and ctx.cancel_token.is_cancelled():
+            proc.kill()
+            for thread in threads:
+                thread.join(timeout=2)
+            return {"success": False, "error_code": "agent_cancelled",
+                    "error": "Command cancelled by user",
+                    "stdout": "".join(chunks["stdout"])[-TAIL_CHARS:],
+                    "stderr": "".join(chunks["stderr"])[-TAIL_CHARS:]}
         if time.monotonic() > deadline:
             proc.kill()
             for thread in threads:

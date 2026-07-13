@@ -8,7 +8,9 @@ from typing import Any, Generator
 
 import httpx
 
-from nexcoder.agent.errors import ModelHTTPError, ModelStreamError, ModelUnavailableError
+from nexcoder.agent.errors import (
+    AgentCancelledError, ModelHTTPError, ModelStreamError, ModelUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -351,8 +353,16 @@ class ModelConnector:
                                 attempts, self.BUSY_RETRY_SECONDS)
                     time.sleep(self.BUSY_RETRY_SECONDS)
                     continue
+                detail = ""
+                try:
+                    exc.response.read()
+                    detail = f": {exc.response.text[:300]}"
+                except Exception:
+                    pass
                 raise ModelHTTPError(
-                    f"AI backend error: HTTP {exc.response.status_code}") from exc
+                    f"AI backend error: HTTP {exc.response.status_code}{detail}") from exc
+            except AgentCancelledError:
+                raise  # user cancel must not be masked as a stream error
             except Exception as exc:
                 raise ModelStreamError(f"AI stream interrupted: {exc}") from exc
             return self.merge_stream_chunks(chunks)

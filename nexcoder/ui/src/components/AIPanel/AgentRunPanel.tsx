@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Terminal, FilePenLine, FilePlus2, FileText, Search, FolderOpen, BookOpen, ListChecks, Wrench, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAgentRunStore, TranscriptItem } from '../../store/useAgentRunStore';
-import { agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
+import { agentCancelV2, agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
 
 function DiffView({ diff }: { diff: string }) {
   return (
@@ -106,6 +106,12 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
             <button className="btn" onClick={() => agentPermissionResponse(permission.id, 'allow_always')}>Always allow</button>
             <button className="btn" onClick={() => agentPermissionResponse(permission.id, 'deny')}>Deny</button>
           </div>
+        </div>
+      )}
+
+      {runActive && (
+        <div className="agent-run-stop">
+          <button className="btn btn-ghost" onClick={() => agentCancelV2()}>■ Stop</button>
         </div>
       )}
 

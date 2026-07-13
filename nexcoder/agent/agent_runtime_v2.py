@@ -9,6 +9,7 @@ import uuid
 
 from PySide6.QtCore import QThread, Signal
 
+from nexcoder.agent.cancellation import CancellationToken
 from nexcoder.agent.core.backend_config import load_backend_config
 from nexcoder.agent.core.belt_factory import build_default_belt
 from nexcoder.agent.core.loop import AGENT_SYSTEM_PROMPT, AgentLoop
@@ -72,6 +73,11 @@ class AgentV2Worker(QThread):
         self._gate = gate
         self._full_auto = full_auto
         self._skill_id = skill_id
+        self.cancel_token = CancellationToken()
+
+    def cancel(self) -> None:
+        """Request cooperative cancellation of the running loop."""
+        self.cancel_token.cancel()
 
     def run(self) -> None:
         try:
@@ -94,6 +100,7 @@ class AgentV2Worker(QThread):
                 extra_system=(render_repo_map(repo_map) + "\n\n"
                               + render_skills_catalog(self._project_root)),
                 session_store=SessionStore(self._project_root),
+                cancel_token=self.cancel_token,
             )
             result = loop.run(self._prompt, preload_skill=self._skill_id or None)
         except Exception as exc:  # worker must never crash the app

@@ -13,8 +13,9 @@ import platform
 from typing import Any, Callable, Protocol
 import uuid
 
+from nexcoder.agent.cancellation import CancellationToken
 from nexcoder.agent.core.conversation import Conversation
-from nexcoder.agent.errors import ModelHTTPError
+from nexcoder.agent.errors import AgentCancelledError, ModelHTTPError
 from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.core.session_store import SessionStore
 from nexcoder.agent.core.stream_gate import StreamGate
@@ -86,6 +87,7 @@ class AgentLoop:
         trajectory_mode: str = "agent",
         guardrail_config: ToolGuardrailConfig | None = None,
         session_store: SessionStore | None = None,
+        cancel_token: CancellationToken | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.model = model
@@ -104,6 +106,7 @@ class AgentLoop:
         self.guardrail_config = guardrail_config or ToolGuardrailConfig(
             exempt_repeat_tools=frozenset({"run_command"}))
         self.session_store = session_store
+        self.cancel_token = cancel_token
 
     def _summarize(self, old_messages: list[dict[str, Any]]) -> str:
         transcript = "\n".join(
@@ -125,7 +128,8 @@ class AgentLoop:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         ctx = ToolContext(
             project_root=self.project_root, emit=self.emit,
-            permission_gate=self.permission_gate, run_id=run_id)
+            permission_gate=self.permission_gate, run_id=run_id,
+            cancel_token=self.cancel_token)
         try:
             # Agent state must never end up in the user's commits.
             nexcoder_dir = self.project_root / ".nexcoder"
@@ -195,6 +199,8 @@ class AgentLoop:
         try:
             for turn in range(1, self.max_turns + 1):
                 turns_used = turn
+                if self.cancel_token is not None:
+                    self.cancel_token.raise_if_cancelled()
                 self.emit(AgentEvent("turn_started", {"turn": turn, "run_id": run_id}))
 
                 if conversation.needs_compaction():
@@ -210,8 +216,14 @@ class AgentLoop:
 
                 # Stream prose live but suppress tool-call markup; the
                 # parsed calls surface as tool_started/tool_result events.
-                gate = StreamGate(lambda text, _turn=turn: self.emit(
-                    AgentEvent("text_delta", {"text": text, "turn": _turn})))
+                # The delta callback doubles as the mid-stream cancel point:
+                # raising here aborts the HTTP stream promptly.
+                def _emit_delta(text: str, _turn: int = turn) -> None:
+                    if self.cancel_token is not None:
+                        self.cancel_token.raise_if_cancelled()
+                    self.emit(AgentEvent("text_delta", {"text": text, "turn": _turn}))
+
+                gate = StreamGate(_emit_delta)
                 try:
                     message = self.model.complete(
                         conversation.payload_messages(), extras=extras,
@@ -276,6 +288,8 @@ class AgentLoop:
 
                 results: list[dict[str, Any]] = []
                 for call in turn_data.tool_calls:
+                    if self.cancel_token is not None:
+                        self.cancel_token.raise_if_cancelled()
                     decision = guardrails.before_call(call.name, call.args)
                     if not decision.allows_execution:
                         blocked_total += 1
@@ -316,6 +330,9 @@ class AgentLoop:
                     final_text = ("Run stopped: the agent repeated unproductive "
                                   "tool calls too many times.")
                     break
+        except AgentCancelledError:
+            status = "cancelled"
+            final_text = "Run cancelled by user."
         except Exception as exc:
             logger.exception("Agent run failed")
             status = "error"
