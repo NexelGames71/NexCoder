@@ -14,6 +14,7 @@ from typing import Any, Callable, Protocol
 import uuid
 
 from nexcoder.agent.core.conversation import Conversation
+from nexcoder.agent.errors import ModelHTTPError
 from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.core.session_store import SessionStore
 from nexcoder.agent.core.stream_gate import StreamGate
@@ -189,6 +190,7 @@ class AgentLoop:
         made_tool_call = False
         nudges = 0
         truncation_retries = 0
+        context_retry_done = False
 
         try:
             for turn in range(1, self.max_turns + 1):
@@ -202,13 +204,31 @@ class AgentLoop:
                     guardrails.note_context_compacted()
                     self.emit(AgentEvent("compaction", stats))
 
+                # Hard guarantee we fit the backend context window even if
+                # the token estimator undercounts dense code/JSON.
+                conversation.force_fit()
+
                 # Stream prose live but suppress tool-call markup; the
                 # parsed calls surface as tool_started/tool_result events.
                 gate = StreamGate(lambda text, _turn=turn: self.emit(
                     AgentEvent("text_delta", {"text": text, "turn": _turn})))
-                message = self.model.complete(
-                    conversation.payload_messages(), extras=extras,
-                    on_delta=gate.push)
+                try:
+                    message = self.model.complete(
+                        conversation.payload_messages(), extras=extras,
+                        on_delta=gate.push)
+                except ModelHTTPError as exc:
+                    # Backend rejected the request for exceeding its context
+                    # window: aggressively shrink and retry once before the
+                    # loop's outer handler treats it as fatal.
+                    if "context" in str(exc).lower() and not context_retry_done:
+                        context_retry_done = True
+                        conversation.context_window = max(
+                            2048, int(conversation.context_window * 0.75))
+                        conversation.force_fit()
+                        self.emit(AgentEvent("compaction",
+                                             {"reason": "context_overflow_retry"}))
+                        continue
+                    raise
                 gate.flush()
                 conversation.add(message)
                 turn_data = self.adapter.parse_assistant_message(message)

@@ -104,3 +104,39 @@ class Conversation:
             ]
 
         return {"before": before, "after": self.total_tokens()}
+
+    def force_fit(self) -> None:
+        """Last-resort shrink: stub out the oldest non-protected messages
+        until the estimated total fits the input budget. Used before send
+        and after the backend rejects a request for exceeding the context
+        window (the token estimator can undercount dense code)."""
+        target = int(self.input_budget * 0.9)
+
+        def stub_at(index: int) -> None:
+            message = self._messages[index]
+            replacement: dict[str, Any] = {
+                "role": message.get("role", "user"),
+                "content": "[dropped to fit context]",
+                "_compacted": True,
+            }
+            if "tool_call_id" in message:
+                replacement["tool_call_id"] = message["tool_call_id"]
+            self._messages[index] = replacement
+
+        # Pass 1: stub oldest non-protected messages.
+        index = 1
+        while self.total_tokens() > target:
+            cutoff = max(1, len(self._messages) - self.PROTECTED_RECENT)
+            if index >= cutoff:
+                break
+            stub_at(index)
+            index += 1
+
+        # Pass 2 (last resort): the protected window itself is too big for
+        # this budget. Stub everything except system[0] and the final
+        # message so the request can never exceed the context window.
+        index = 1
+        while self.total_tokens() > target and index < len(self._messages) - 1:
+            if not self._messages[index].get("_compacted"):
+                stub_at(index)
+            index += 1

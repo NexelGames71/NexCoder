@@ -41,6 +41,17 @@ def test_compact_collapses_old_tool_results_first():
     assert convo.messages()[-1]["content"] == f"recent {Conversation.PROTECTED_RECENT - 1}"
 
 
+def test_force_fit_drops_oldest_until_under_budget():
+    convo = make_convo(context_window=600, reserve_output=100)
+    for i in range(12):
+        convo.add({"role": "user", "content": f"turn {i} " + "z" * 500})
+    convo.force_fit()
+    assert convo.total_tokens() <= convo.input_budget
+    messages = convo.messages()
+    assert messages[0]["content"] == "system prompt"  # system survives
+    assert messages[-1]["content"].startswith("turn 11")  # newest survives
+
+
 def test_compact_summarizes_old_turns_when_still_over_budget():
     convo = make_convo(context_window=400, reserve_output=100)
     for i in range(10):
