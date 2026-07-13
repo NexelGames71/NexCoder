@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nexcoder.agent.core.tools.base import ToolBelt
 from nexcoder.agent.core.tools.files import register_file_tools
+from nexcoder.agent.core.tools.memory_tool import register_memory_tool
 from nexcoder.agent.core.tools.search import register_search_tools
 from nexcoder.agent.core.tools.shell import register_shell_tool
 from nexcoder.agent.core.tools.skill import register_skill_tool
@@ -17,4 +18,5 @@ def build_default_belt() -> ToolBelt:
     register_shell_tool(belt)
     register_todo_tool(belt)
     register_skill_tool(belt)
+    register_memory_tool(belt)
     return belt

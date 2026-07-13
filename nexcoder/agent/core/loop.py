@@ -148,6 +148,12 @@ class AgentLoop:
                        "quoting), and && to chain.")
         if self.extra_system:
             system += "\n\n" + self.extra_system
+        from nexcoder.agent.core.memory import load_project_memory
+        project_memory = load_project_memory(self.project_root)
+        if project_memory:
+            system += ("\n\n# Project memory (durable facts from earlier "
+                       "sessions; trust unless the code contradicts them)\n"
+                       + project_memory)
         # The preloaded skill must live INSIDE the first system message:
         # several chat-template formatters (llama-cpp-python chatml among
         # them) silently drop every system message after the first.
