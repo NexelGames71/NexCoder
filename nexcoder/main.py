@@ -9,11 +9,34 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 
 
+def _load_env() -> None:
+    """Load .env, resolving it whether running from source or a frozen exe.
+
+    A PyInstaller build resolves ``__file__`` inside the bundle, so the
+    source-relative path never finds the user's project ``.env``. When
+    frozen we look next to the executable (and its parents) first, so the
+    packaged app honours NEXA_* settings just like the dev run.
+    """
+    candidates = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        candidates += [
+            os.path.join(exe_dir, ".env"),
+            os.path.join(os.path.dirname(exe_dir), ".env"),
+            os.path.join(os.path.dirname(os.path.dirname(exe_dir)), ".env"),
+        ]
+    candidates.append(
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+    candidates.append(os.path.join(os.getcwd(), ".env"))
+    for path in candidates:
+        if os.path.isfile(path):
+            load_dotenv(path)
+            return
+
+
 def main() -> None:
     """Launch the NexCoder desktop application."""
-    # Load environment variables from .env
-    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-    load_dotenv(env_path)
+    _load_env()
 
     # Import PySide6 after env is loaded
     from PySide6.QtWidgets import QApplication

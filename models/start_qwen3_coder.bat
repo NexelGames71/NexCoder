@@ -28,7 +28,9 @@ if "%NEXCODER_GGUF_CHAT_FORMAT%"=="" (
 REM 30B MoE (3B active) with an 8GB card: offload what fits, rest on CPU.
 REM Raise GPU_LAYERS if you have VRAM headroom; lower it on OOM.
 if "%NEXCODER_GGUF_GPU_LAYERS%"=="" set NEXCODER_GGUF_GPU_LAYERS=12
-if "%NEXCODER_GGUF_CTX%"=="" set NEXCODER_GGUF_CTX=16384
+REM 32k context: ~3GB KV cache, fits alongside the ~18GB weights on 32GB
+REM RAM. Push to 65536 if you have RAM headroom; lower on OOM at load.
+if "%NEXCODER_GGUF_CTX%"=="" set NEXCODER_GGUF_CTX=32768
 REM Speed: bigger prompt batches + RAM prompt-cache (turn N only evaluates
 REM the new suffix instead of the whole history).
 if "%NEXCODER_GGUF_N_BATCH%"=="" set NEXCODER_GGUF_N_BATCH=1024

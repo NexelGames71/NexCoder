@@ -21,5 +21,5 @@ def load_backend_config() -> BackendConfig:
         model=os.getenv("NEXA_MODEL", "default"),
         api_key=os.getenv("NEXA_API_KEY", ""),
         adapter=os.getenv("NEXCODER_ADAPTER", "xml"),
-        context_window=max(2048, int(os.getenv("NEXA_CONTEXT_WINDOW", "8192"))),
+        context_window=max(2048, int(os.getenv("NEXA_CONTEXT_WINDOW", "32768"))),
     )

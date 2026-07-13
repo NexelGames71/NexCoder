@@ -3,6 +3,7 @@ import { Send, Plus, Cpu, ShieldCheck, Eye } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { useAgentStore } from '../../store/useAgentStore';
 import { useAgentRunStore } from '../../store/useAgentRunStore';
+import { agentCancelV2 } from '../../services/bridge';
 import ActiveSkillChip from './ActiveSkillChip';
 
 const MODEL_LABELS: Record<string, string> = {
@@ -105,9 +106,9 @@ export default function ChatInput({ input, onChange, onSend, onOpenSkillPicker, 
 
             <button
               className="chat-send-btn"
-              onClick={onSend}
-              disabled={isStreaming || !input.trim()}
-              title={isStreaming ? "Streaming..." : "Send Message"}
+              onClick={isStreaming ? () => agentCancelV2() : onSend}
+              disabled={!isStreaming && !input.trim()}
+              title={isStreaming ? "Stop the agent" : "Send Message"}
             >
               {isStreaming ? (
                 <span className="stop-icon" />

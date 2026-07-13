@@ -8,7 +8,7 @@ def test_defaults(monkeypatch):
     config = load_backend_config()
     assert config.base_url == "http://127.0.0.1:8002"
     assert config.adapter == "xml"
-    assert config.context_window == 8192
+    assert config.context_window == 32768
 
 
 def test_env_overrides(monkeypatch):
