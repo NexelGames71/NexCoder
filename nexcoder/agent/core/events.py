@@ -19,6 +19,7 @@ EventType = Literal[
     "permission_resolved",
     "checkpoint_created",
     "compaction",
+    "context_usage",
     "run_completed",
     "run_error",
 ]

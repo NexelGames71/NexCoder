@@ -1754,3 +1754,13 @@
 .agent-run-files .files-header { color: var(--text-secondary); font-weight: 600; margin-bottom: 2px; }
 .agent-run-stop { margin-top: var(--space-2); }
 .agent-run-stop .btn { color: #f87171; font-size: 11.5px; }
+
+/* Context usage meter + compaction notices */
+.agent-run-stop { display: flex; align-items: center; gap: var(--space-3); }
+.context-meter { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
+.context-meter-bar { flex: 1; height: 4px; background: var(--bg-deep); border-radius: 2px; overflow: hidden; min-width: 60px; }
+.context-meter-fill { height: 100%; background: var(--accent-purple); border-radius: 2px; transition: width 0.4s ease; }
+.context-meter-fill.warm { background: #fbbf24; }
+.context-meter-fill.hot { background: #f87171; }
+.context-meter-label { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
+.agent-run-notice { font-size: 11px; font-style: italic; color: var(--text-secondary); padding: 2px 0 2px 22px; }

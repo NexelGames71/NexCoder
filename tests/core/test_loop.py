@@ -181,6 +181,24 @@ def test_repeated_read_allowed_after_compaction(tmp_path):
     assert again.allows_execution
 
 
+def test_loop_emits_context_usage_each_turn(tmp_path):
+    (tmp_path / "a.txt").write_text("hi", encoding="utf-8")
+    model = FakeModel([
+        xml_call("read_file", '{"path": "a.txt"}'),
+        {"role": "assistant", "content": "done"},
+    ])
+    loop, events = make_loop(tmp_path, model)
+    loop.run("read it")
+    usage = [e for e in events if e.type == "context_usage"]
+    assert len(usage) == 2  # one per turn
+    payload = usage[0].payload
+    assert payload["tokens"] > 0
+    assert payload["budget"] > 0
+    assert 0 <= payload["percent"] <= 100
+    # Usage grows as history accumulates
+    assert usage[1].payload["tokens"] > usage[0].payload["tokens"]
+
+
 def test_loop_todo_state_in_result(tmp_path):
     model = FakeModel([
         xml_call("todo_write",

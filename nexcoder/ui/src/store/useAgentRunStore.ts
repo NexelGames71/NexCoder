@@ -8,10 +8,13 @@ export interface AgentEventMsg { type: string; payload: Record<string, any>; ts?
 // the order they happened instead of living in separate buckets.
 export type TranscriptItem =
   | { kind: 'text'; text: string }
+  | { kind: 'notice'; text: string }
   | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean;
       success?: boolean; summary?: string;
       output?: string[];   // streamed command output lines
       diff?: string };     // unified diff for file edits
+
+export interface ContextUsage { tokens: number; budget: number; percent: number; }
 
 const MAX_OUTPUT_LINES = 500;
 
@@ -24,11 +27,13 @@ export interface AgentRun {
   mutatedFiles: string[];
   finalText: string;
   status: string;
+  contextUsage: ContextUsage | null;
 }
 
 const emptyRun = (): AgentRun => ({
   runActive: true, transcript: [], todos: [], permission: null,
   checkpointId: null, mutatedFiles: [], finalText: '', status: 'running',
+  contextUsage: null,
 });
 
 interface AgentRunState {
@@ -82,6 +87,17 @@ function applyEvent(run: AgentRun, event: AgentEventMsg): AgentRun {
       return { ...run, transcript };
     }
     case 'todo_updated': return { ...run, todos: payload.todos ?? [] };
+    case 'context_usage':
+      return { ...run, contextUsage: {
+        tokens: payload.tokens ?? 0, budget: payload.budget ?? 0,
+        percent: payload.percent ?? 0 } };
+    case 'compaction': {
+      const before = payload.before, after = payload.after;
+      const text = (typeof before === 'number' && typeof after === 'number')
+        ? `Context compacted: ~${(before / 1000).toFixed(1)}k → ~${(after / 1000).toFixed(1)}k tokens`
+        : 'Context compacted to fit the model window';
+      return { ...run, transcript: [...run.transcript, { kind: 'notice', text }] };
+    }
     case 'permission_request':
       return { ...run, permission: { id: payload.id, tool: payload.tool, command: payload.command } };
     case 'permission_resolved': return { ...run, permission: null };

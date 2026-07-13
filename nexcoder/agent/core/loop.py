@@ -220,6 +220,15 @@ class AgentLoop:
                 # the token estimator undercounts dense code/JSON.
                 conversation.force_fit()
 
+                tokens = conversation.total_tokens()
+                self.emit(AgentEvent("context_usage", {
+                    "tokens": tokens,
+                    "budget": conversation.input_budget,
+                    "window": conversation.context_window,
+                    "percent": min(100, round(100 * tokens / conversation.input_budget)),
+                    "turn": turn,
+                }))
+
                 # Stream prose live but suppress tool-call markup; the
                 # parsed calls surface as tool_started/tool_result events.
                 # The delta callback doubles as the mid-stream cancel point:
