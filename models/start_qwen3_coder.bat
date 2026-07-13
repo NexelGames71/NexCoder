@@ -27,7 +27,10 @@ if "%NEXCODER_GGUF_CHAT_FORMAT%"=="" (
 
 REM 30B MoE (3B active) with an 8GB card: offload what fits, rest on CPU.
 REM Raise GPU_LAYERS if you have VRAM headroom; lower it on OOM.
-if "%NEXCODER_GGUF_GPU_LAYERS%"=="" set NEXCODER_GGUF_GPU_LAYERS=12
+if "%NEXCODER_GGUF_GPU_LAYERS%"=="" set NEXCODER_GGUF_GPU_LAYERS=10
+REM Keep the KV cache in system RAM (0) so big context fits an 8GB card.
+REM Set to 1 only if you have plenty of spare VRAM.
+if "%NEXCODER_GGUF_KV_OFFLOAD%"=="" set NEXCODER_GGUF_KV_OFFLOAD=0
 REM 32k context: ~3GB KV cache, fits alongside the ~18GB weights on 32GB
 REM RAM. Push to 65536 if you have RAM headroom; lower on OOM at load.
 if "%NEXCODER_GGUF_CTX%"=="" set NEXCODER_GGUF_CTX=32768

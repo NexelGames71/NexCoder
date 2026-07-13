@@ -566,6 +566,13 @@ def load_model(model_path: str):
             GPU_OFFLOAD_AVAILABLE,
             n_gpu_layers,
         )
+        # Keep the KV cache in system RAM by default (offload_kqv=False).
+        # At large context the KV cache is the biggest VRAM consumer; on an
+        # 8GB card a 32k cache overflows. Housing it in the (much larger)
+        # system RAM lets us keep both a big context and GPU weight offload.
+        # Set NEXCODER_GGUF_KV_OFFLOAD=1 to put it back on the GPU.
+        offload_kqv = os.getenv("NEXCODER_GGUF_KV_OFFLOAD", "0").strip().lower() in {
+            "1", "true", "yes", "on"}
         llama_kwargs: dict = dict(
             model_path=model_path,
             n_ctx=n_ctx,
@@ -573,18 +580,37 @@ def load_model(model_path: str):
             n_threads=threads,
             chat_format=os.getenv("NEXCODER_GGUF_CHAT_FORMAT", "chatml"),
             verbose=False,
+            offload_kqv=offload_kqv,
             # Larger batch = faster prompt processing (agent prompts are long).
             n_batch=int(os.getenv("NEXCODER_GGUF_N_BATCH", "1024")),
         )
         if os.getenv("NEXCODER_GGUF_FLASH_ATTN", "0").strip().lower() in {"1", "true", "yes", "on"}:
             llama_kwargs["flash_attn"] = True
-        try:
-            model = Llama(**llama_kwargs)
-        except TypeError:
-            # Older llama-cpp-python without one of the tuning kwargs.
-            llama_kwargs.pop("flash_attn", None)
-            llama_kwargs.pop("n_batch", None)
-            model = Llama(**llama_kwargs)
+        logger.info("GGUF kv_offload=%s, n_ctx=%s, n_batch=%s",
+                    offload_kqv, n_ctx, llama_kwargs["n_batch"])
+
+        def _new_llama(kwargs: dict):
+            # Retry with progressively smaller footprints on OOM so the
+            # server starts rather than crashing on constrained hardware.
+            attempts = [kwargs]
+            half = {**kwargs, "n_ctx": max(8192, n_ctx // 2)}
+            attempts.append(half)
+            for i, attempt in enumerate(attempts):
+                try:
+                    return Llama(**attempt)
+                except TypeError:
+                    attempt.pop("flash_attn", None)
+                    attempt.pop("n_batch", None)
+                    attempt.pop("offload_kqv", None)
+                    return Llama(**attempt)
+                except (ValueError, RuntimeError, MemoryError) as exc:
+                    if i == len(attempts) - 1:
+                        raise
+                    logger.warning("Model load failed (%s); retrying with "
+                                   "n_ctx=%s", exc, attempts[i + 1]["n_ctx"])
+            raise RuntimeError("unreachable")
+
+        model = _new_llama(llama_kwargs)
 
         # Prompt cache: agent loops resend the same growing prefix every
         # turn (system prompt + repo map + history). Caching evaluated
