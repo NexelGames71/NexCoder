@@ -1,4 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+const WORKING_WORDS = ['Thinking', 'Working', 'Reasoning'];
+
+function WorkingIndicator() {
+  const [word, setWord] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setWord((w) => (w + 1) % WORKING_WORDS.length), 4000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="agent-working">
+      <span className="working-dot" />
+      <span className="working-dot" />
+      <span className="working-dot" />
+      <span className="working-word">{WORKING_WORDS[word]}…</span>
+    </div>
+  );
+}
 import { Terminal, FilePenLine, FilePlus2, FileText, Search, FolderOpen, BookOpen, ListChecks, Wrench, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAgentRunStore, TranscriptItem } from '../../store/useAgentRunStore';
 import { agentCancelV2, agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
@@ -111,6 +129,8 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
           </div>
         </div>
       )}
+
+      {runActive && !permission && <WorkingIndicator />}
 
       {runActive && (
         <div className="agent-run-stop">
