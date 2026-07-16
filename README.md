@@ -1,13 +1,43 @@
-﻿# NexCoder
+# NexCoder
 
-NexCoder is a PySide6 desktop code editor for the Nexa ecosystem. It embeds a React, TypeScript, and Monaco frontend in `QWebEngineView`, with Python services exposed through `QWebChannel`.
+NexCoder is a production-grade agentic coding IDE for the Nexa ecosystem: a
+PySide6 desktop app embedding a React + TypeScript + Monaco frontend in
+`QWebEngineView`, with Python services exposed through `QWebChannel`.
+
+One engine powers everything. Every AI surface — the chat panel's Agent,
+Ask, Edit, Debug, Review, and Scan modes, and the terminal CLI — is a thin
+policy profile (system prompt + tool subset + turn budget) over the same
+v2 agentic core (`nexcoder/agent/core/`).
+
+## Highlights
+
+- **Agentic loop** — plans with a visible todo list, edits files directly
+  (checkpoint-backed revert per run or per file), asks permission before
+  running commands, verifies its own work, records trajectories.
+- **Structural safety** — read-only modes (Ask/Review/Scan) simply do not
+  receive mutating tools; permission gates + per-project command allowlist
+  guard the rest. Full-auto mode still denies risky commands.
+- **Auto-context** — the active editor file and text selection travel with
+  every run ("fix this" means the selected code).
+- **Persistent chat history** — every run appends to a per-project session
+  (`.nexcoder/sessions/`); follow-up prompts replay recent conversation;
+  history survives restarts and is browsable in the Chats sidebar.
+- **Skills** — a Claude-Code-style skill catalog (commit, code-review,
+  systematic-debugging, …) the agent loads on demand; invoke directly with
+  `/skill-id` or `--skill`. Projects add their own under
+  `.nexcoder/skills/<id>/SKILL.md`.
+- **Context management** — token budgeting, two-stage compaction, and a
+  hard force-fit guarantee before every model call; live context meter in
+  the composer.
+- **Local-first** — runs fully offline against a local GGUF model server;
+  switching to a hosted GPU endpoint is config-only.
 
 ## Development
 
 ```powershell
 python -m venv venv
-venv\Scripts\pip.exe install -r requirements.txt
-venv\Scripts\pip.exe install -r requirements-gpu.txt
+venv\Scripts\python.exe -m pip install -r requirements.txt
+venv\Scripts\python.exe -m pip install -r requirements-gpu.txt
 cd nexcoder\ui
 npm.cmd install
 npm.cmd run build
@@ -15,131 +45,92 @@ cd ..\..
 venv\Scripts\python.exe -m nexcoder.main
 ```
 
-## Build
+Tests:
+
+```powershell
+venv\Scripts\python.exe -m pytest tests -q
+```
+
+## Build (packaged exe)
 
 ```powershell
 venv\Scripts\python.exe build.py
 ```
 
-The packaged app is written to `dist\NexCoder`.
+The packaged app is written to `dist\NexCoder`. The frozen exe reads `.env`
+from its own directory.
 
-## Local Qwen3-Coder-30B-A3B GGUF Model (recommended)
+## Local model (Qwen3-Coder-30B-A3B GGUF, recommended)
 
-The MoE 30B (3B active) model is markedly more reliable for agent mode than
-the 7B and runs on 32GB RAM + a consumer GPU via partial offload:
-
-```powershell
-cd models
-.\start_qwen3_coder.bat
-```
-
-Then point the agent at a matching context budget:
+Models and the serving stack live centrally in `C:\Nexa` (see
+`C:\Nexa\GGUF_SERVING.md`). The MoE 30B (3B active) runs on 32GB RAM + a
+consumer GPU by housing the KV cache in system RAM:
 
 ```powershell
-$env:NEXA_CONTEXT_WINDOW = "16384"
+C:\Nexa\start_gguf.bat            # default: Qwen3-Coder-30B at :8002
 ```
 
-Tuning: `NEXCODER_GGUF_GPU_LAYERS` (default 14 — raise with more VRAM,
-lower on CUDA OOM), `NEXCODER_GGUF_CTX` (default 16384).
+Tuning env vars: `NEXCODER_GGUF_GPU_LAYERS` (raise with more VRAM, lower on
+OOM), `NEXCODER_GGUF_CTX` (server context), `NEXCODER_GGUF_KV_OFFLOAD=0`
+(KV in RAM). The server is OpenAI-compatible, so other coding agents
+(Cursor, etc.) can use it too — `start_tunnel.bat` exposes it via
+cloudflared (set `NEXCODER_API_KEY` first).
 
-## Local Qwen2.5-Coder GGUF Model
-
-NexCoder can use the bundled `Qwen2.5-Coder-7B-Instruct` GGUF model through the local OpenAI-compatible server in `models/server.py`.
-
-```powershell
-cd models
-..\venv\Scripts\pip.exe install -r ..\requirements-gpu.txt
-.\start_api.bat
-```
-
-If the Hugging Face repo contains multiple `.gguf` files, start the server with `--model-path` pointing to the exact `.gguf` file you want.
-
-```powershell
-$env:NEXCODER_REQUIRE_GPU = "1"
-$env:NEXCODER_GGUF_GPU_LAYERS = "-1"
-C:\NexCoder\venv\Scripts\python.exe C:\NexCoder\models\server.py --port 8001 --model-path C:\NexCoder\models\coder\Qwen2.5-Coder-7B-Instruct-GGUF\qwen2.5-coder-7b-instruct-q6_k.gguf
-```
-## CLI Agent (v2 agentic core)
-
-The v2 engine is a Cursor-class agentic loop: it plans with a visible todo
-list, edits files directly (checkpoint-backed revert), asks permission before
-running commands, and verifies its own work.
+## CLI agent
 
 ```powershell
 # Interactive (prompts before each command; [a]lways adds to the allowlist)
-C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --engine v2 --project C:\MyApp "fix the failing test"
+venv\Scripts\python.exe -m nexcoder.cli --project C:\MyApp "fix the failing test"
 
 # Full auto (no command prompts; risky commands still denied)
-C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --engine v2 --auto --project C:\MyApp "build a landing page"
+venv\Scripts\python.exe -m nexcoder.cli --auto --project C:\MyApp "build a landing page"
+
+# Mode profiles (agent | ask | edit | debug | review | scan)
+venv\Scripts\python.exe -m nexcoder.cli --mode review --project C:\MyApp "review the auth module"
+
+# Skills
+venv\Scripts\python.exe -m nexcoder.cli "/commit group and commit my changes"
+venv\Scripts\python.exe -m nexcoder.cli --skill code-review "review the auth module"
+
+# Machine-readable events
+venv\Scripts\python.exe -m nexcoder.cli --jsonl --project C:\MyApp "scan the project"
 ```
 
-Configuration (env vars, also read from `.env`):
+## Configuration
+
+Env vars (also read from `.env` next to the repo root or the frozen exe):
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEXA_API_URL` | `http://127.0.0.1:8002` | OpenAI-compatible backend |
 | `NEXA_MODEL` | `default` | Model name sent to the backend |
 | `NEXCODER_ADAPTER` | `xml` | Tool-call transport: `xml` (local GGUF) or `native` (OpenAI function calling) |
-| `NEXA_CONTEXT_WINDOW` | `8192` | Context budget for compaction |
-| `NEXCODER_ENGINE` | `v2` | Default CLI engine (`v1` = legacy Hermes loop) |
+| `NEXA_CONTEXT_WINDOW` | `32768` | Context budget for compaction |
 
-**GPU-server migration:** point `NEXA_API_URL` at the hosted endpoint and set
-`NEXCODER_ADAPTER=native`. Nothing else changes.
+All of these are also editable live in the app under Agent Settings
+(`Ctrl+Shift+,`), alongside the per-project command allowlist and the
+project memory the agent injects into every run.
 
-Per-project state lives in `.nexcoder/`: `permissions.json` (command
-allowlist), `checkpoints/` (revert snapshots), `repo_map.json`, `sessions/`,
-`trajectories/`, and `skills/` (project-local skills).
+**GPU-server migration:** point `NEXA_API_URL` at the hosted endpoint and
+set `NEXCODER_ADAPTER=native`. Nothing else changes.
 
-### Skills
+## Per-project state (`.nexcoder/`)
 
-The v2 agent sees a catalog of all skills in its prompt and loads relevant
-ones itself via `load_skill`. You can also invoke a skill directly:
+| Path | Contents |
+|---|---|
+| `sessions/` | Chat history (index + JSONL messages per session) |
+| `checkpoints/` | Revert snapshots taken before every mutation |
+| `permissions.json` | Always-allowed commands |
+| `MEMORY.md` | Durable project memory (agent `remember` tool) |
+| `repo_map.json` | Cached repository map |
+| `trajectories/` | Compact JSONL run traces |
+| `skills/` | Project-local skills (override built-ins by id) |
 
-```powershell
-# Slash prefix in the prompt (chat panel or CLI)
-... -m nexcoder.cli "/commit group and commit my changes"
+## Acceptance harnesses
 
-# Or the explicit flag
-... -m nexcoder.cli --skill code-review "review the auth module"
-```
-
-Built-in workflow skills include `commit`, `init`, `code-review`,
-`systematic-debugging`, `verification-before-completion`, and
-`writing-plans`. Projects can add or override skills by creating
-`.nexcoder/skills/<id>/SKILL.md` with `name:` and `description:`
-frontmatter — they appear in the picker under "Project" and take
-precedence over built-ins with the same id.
-
-Acceptance harnesses (require the local model server):
+Require the local model server:
 
 ```powershell
 venv\Scripts\python.exe tests\e2e\run_greenfield.py
 venv\Scripts\python.exe tests\e2e\run_brownfield.py
 ```
-
-## CLI Agent (legacy v1)
-
-Run NexCoder's Hermes-style coding agent directly in a terminal:
-
-```powershell
-C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --project C:\NexCoder "scan the project and create a codebase map"
-```
-
-Useful options:
-
-```powershell
-# Run agent mode and show tool steps / patch previews
-C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --project C:\Spinner "build a single-file spinner page"
-
-# Emit machine-readable events
-C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --jsonl --project C:\Spinner "scan the project"
-
-# Apply prepared full-file patches after a successful run
-C:\NexCoder\venv\Scripts\python.exe -m nexcoder.cli --apply --project C:\Spinner "update index.html"
-```
-
-By default, `write_file` prepares patch previews and does not write them to disk. Use `--apply` only when you want the CLI to write the prepared patch payloads.
-
-Create a polished responsive static product page. Create index.html, styles.css, script.js, and README.md. Use plain HTML, CSS, and JavaScript only. Include a dark visual system, responsive navigation, three product cards, accessible controls, and a working theme toggle. Do not install packages. Complete every requested file in this run and prepare all changes for review.
-
-venv\Scripts\python.exe -m nexcoder.main

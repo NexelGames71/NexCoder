@@ -145,6 +145,50 @@ class BridgeSlotTests(unittest.TestCase):
         self.assertTrue(out["success"])
         self.assertTrue(out["metadata"]["archived"])
 
+    # ── v2 run persistence → chat history restore ────────────────────
+
+    def test_v2_run_persists_and_restores_as_chat(self):
+        # Simulate what agent_run_v2 + _on_agent_v2_finished do around a
+        # run, then restore through the same slots the Chats panel uses.
+        session_id, history = self.bridge._persist_v2_prompt(
+            self.root, None, "add a parser", "agent")
+        self.assertIsNotNone(session_id)
+        self.assertEqual(history, [])
+
+        result_json = json.dumps({
+            "run_id": "run_x", "status": "completed", "success": True,
+            "final_text": "Done: parser.py created.", "mutated_files": ["parser.py"],
+        })
+        enriched = json.loads(self.bridge._persist_v2_result(result_json))
+        self.assertEqual(enriched["session_id"], session_id)
+
+        listed = json.loads(self.bridge.list_sessions(self.root))
+        self.assertEqual(len(listed["sessions"]), 1)
+        self.assertEqual(listed["sessions"][0]["title"], "add a parser")
+
+        loaded = json.loads(self.bridge.load_session(self.root, session_id))
+        self.assertTrue(loaded["success"])
+        roles = [m["role"] for m in loaded["messages"]]
+        self.assertEqual(roles, ["user", "assistant"])
+        self.assertIn("parser.py", loaded["messages"][1]["content"])
+
+        # A follow-up prompt in the restored session carries the history.
+        session_id2, history2 = self.bridge._persist_v2_prompt(
+            self.root, session_id, "now add tests", "agent")
+        self.assertEqual(session_id2, session_id)
+        self.assertEqual([m["role"] for m in history2], ["user", "assistant"])
+
+    def test_v2_result_with_empty_final_text_is_not_blank(self):
+        session_id, _ = self.bridge._persist_v2_prompt(
+            self.root, None, "do a thing", "agent")
+        self.bridge._persist_v2_result(json.dumps({
+            "run_id": "r", "status": "cancelled", "final_text": "",
+            "mutated_files": [],
+        }))
+        loaded = json.loads(self.bridge.load_session(self.root, session_id))
+        self.assertTrue(loaded["messages"][1]["content"].strip())
+        self.assertIn("cancelled", loaded["messages"][1]["content"])
+
     # ── redact_text ──────────────────────────────────────────────────
 
     def test_redact_text_with_secret(self):

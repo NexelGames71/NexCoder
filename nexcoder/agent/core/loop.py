@@ -54,7 +54,13 @@ write_file only for new files or full rewrites.
 4. Verify your work: after making changes, run a verification command \
 (tests, build, or a quick check) with run_command. If it fails, read the \
 error, fix the code, and verify again before finishing.
-5. When the task is fully complete and verified, reply with a short plain-text \
+5. Build durable knowledge: when you discover a non-obvious project fact \
+you needed to work this task — the build/test/run commands, where a \
+subsystem lives, an architectural decision, a gotcha — save it with the \
+remember tool (one short sentence each). The "Project memory" section of \
+this prompt is what past runs saved; trust it instead of re-discovering, \
+and don't re-save what it already says.
+6. When the task is fully complete and verified, reply with a short plain-text \
 summary of what changed and how it was verified. No tool calls in that final \
 message."""
 

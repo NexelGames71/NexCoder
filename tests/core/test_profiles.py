@@ -13,6 +13,12 @@ def test_all_six_modes_exist():
         assert profile.max_turns >= 4
 
 
+def test_scan_persists_architecture_to_memory():
+    # Scan mode must save what it learned so future runs start warm.
+    prompt = get_v2_profile("scan").system_prompt
+    assert "remember" in prompt
+
+
 def test_unknown_mode_raises():
     with pytest.raises(ValueError):
         get_v2_profile("nonsense")

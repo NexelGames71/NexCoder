@@ -100,6 +100,12 @@ PROFILES: dict[str, V2Profile] = {
             "a structured overview: purpose, language/framework, layout, "
             "key modules, how to build/run/test, and notable patterns or "
             "risks.\n" + _CITE_RULE +
+            "Before your final answer, persist what you learned so future "
+            "runs skip this exploration: call the remember tool once per "
+            "durable fact (purpose/stack, layout of key modules, "
+            "build/run/test commands, notable conventions) — 3 to 6 short "
+            "notes, each one sentence. Skip facts the Project memory "
+            "section of this prompt already contains.\n"
             "Keep the final overview under ~400 words, organized with "
             "short headings."),
         tools=READ_TOOLS,

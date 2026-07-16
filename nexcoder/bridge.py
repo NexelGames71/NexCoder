@@ -571,9 +571,16 @@ class Bridge(QObject):
             result = json.loads(result_json)
             store = self._session_store(
                 os.path.abspath(self._current_project_path))
+            content = str(result.get("final_text") or "").strip()
+            if not content:
+                # Never store a blank assistant turn — restored chats
+                # would show an empty bubble.
+                mutated = result.get("mutated_files") or []
+                status = str(result.get("status") or "finished")
+                content = (f"(run {status}; {len(mutated)} file(s) changed)"
+                           if mutated else f"(run {status})")
             store.append_message(
-                session_id, "assistant",
-                str(result.get("final_text") or ""),
+                session_id, "assistant", content,
                 {"run_id": result.get("run_id"),
                  "status": result.get("status"),
                  "checkpoint_id": result.get("checkpoint_id"),

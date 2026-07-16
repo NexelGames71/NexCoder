@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, ArchiveRestore, MessageSquarePlus, Trash2 } from 'lucide-react';
-import { createSession, archiveSession, deleteSession, listSessions, loadSession } from '../../services/bridge';
+import { createSession, archiveSession, deleteSession, getBridge, listSessions, loadSession } from '../../services/bridge';
 import { useChatStore } from '../../store/useChatStore';
 import { useProjectStore } from '../../store/useProjectStore';
 import { ChatMessage, SessionMetadata, StoredSessionMessage } from '../../types';
@@ -57,6 +57,16 @@ export default function ChatHistoryPanel() {
 
   useEffect(() => {
     refresh();
+  }, [projectPath]);
+
+  // New runs create/update sessions on disk — refresh the list when a
+  // run completes so the chat shows up without a manual Refresh.
+  useEffect(() => {
+    const bridge = getBridge();
+    if (!bridge?.agent_complete) return;
+    const onComplete = () => { refresh(); };
+    bridge.agent_complete.connect(onComplete);
+    return () => bridge.agent_complete.disconnect(onComplete);
   }, [projectPath]);
 
   const visibleSessions = useMemo(() => {
