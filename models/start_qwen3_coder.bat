@@ -15,8 +15,9 @@ REM there, silently switching to a stale CPU-only environment.
 set PYTHON=%~dp0..\venv\Scripts\python.exe
 if not exist "%PYTHON%" set PYTHON=python
 
+REM Models live centrally in C:\Nexa\models (shared across Nexa projects).
 if "%NEXCODER_GGUF_MODEL_PATH%"=="" (
-  set MODEL_PATH=%~dp0coder\Qwen3-Coder-30B-A3B-Instruct-GGUF\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf
+  set MODEL_PATH=C:\Nexa\models\coder\Qwen3-Coder-30B-A3B-Instruct-GGUF\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf
 ) else (
   set MODEL_PATH=%NEXCODER_GGUF_MODEL_PATH%
 )
