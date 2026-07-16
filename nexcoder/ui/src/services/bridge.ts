@@ -197,6 +197,33 @@ export async function agentRevertFile(checkpointId: string, path: string): Promi
   return callBridge('agent_revert_file', checkpointId, path);
 }
 
+// Engine settings / permissions / project memory (settings surface)
+export async function getEngineSettings(): Promise<any> {
+  return callBridge('agent_get_engine_settings');
+}
+
+export async function updateEngineSettings(settings: {
+  context_window?: number; adapter?: string; full_auto?: boolean;
+}): Promise<any> {
+  return callBridge('agent_update_engine_settings', JSON.stringify(settings));
+}
+
+export async function listAgentPermissions(): Promise<any> {
+  return callBridge('agent_permissions_list');
+}
+
+export async function removeAgentPermission(command: string): Promise<any> {
+  return callBridge('agent_permissions_remove', command);
+}
+
+export async function getProjectMemory(): Promise<any> {
+  return callBridge('agent_memory_get');
+}
+
+export async function saveProjectMemory(content: string): Promise<any> {
+  return callBridge('agent_memory_save', content);
+}
+
 export function onAgentEvent(callback: (eventJson: string) => void): void {
   connectSignal('agent_event', callback);
 }

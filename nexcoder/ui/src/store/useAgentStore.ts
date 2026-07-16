@@ -16,6 +16,9 @@ export interface AgentSettings {
   aiModel: string;
   aiEndpoint: string;
   toolAccess: 'full' | 'read_only';
+  contextWindow: number;
+  adapter: 'xml' | 'native';
+  fullAuto: boolean;
   settingsVersion?: number;
 }
 
@@ -47,6 +50,9 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   aiModel: DEFAULT_AI_MODEL,
   aiEndpoint: DEFAULT_AI_ENDPOINT,
   toolAccess: 'full',
+  contextWindow: 32768,
+  adapter: 'xml',
+  fullAuto: false,
   settingsVersion: SETTINGS_VERSION,
 };
 

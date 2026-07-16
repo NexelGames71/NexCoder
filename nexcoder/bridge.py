@@ -4,6 +4,7 @@ import json
 import os
 import logging
 import tempfile
+from pathlib import Path
 from typing import Any, Optional
 
 from PySide6.QtCore import QObject, Qt, Slot, Signal
@@ -487,6 +488,7 @@ class Bridge(QObject):
             self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
                 project_root, prompt, self._agent_v2_gate,
+                full_auto=bool(getattr(self, "_agent_v2_full_auto", False)),
                 skill_id=skill_id, mode=mode or "agent",
                 editor_context=editor_context, history=history)
             # Explicitly queued to real @Slot methods: PySide connects plain
@@ -598,6 +600,117 @@ class Bridge(QObject):
         if self._agent_v2_gate is not None:
             self._agent_v2_gate.resolve(request_id, decision)
         return json.dumps({"success": True})
+
+    # ── Engine settings / permissions / memory (settings surface) ────
+
+    @Slot(result=str)
+    def agent_get_engine_settings(self) -> str:
+        """Current v2 engine configuration, for the settings page."""
+        try:
+            from nexcoder.agent.core.backend_config import load_backend_config
+            config = load_backend_config()
+            return json.dumps({"success": True, "settings": {
+                "base_url": config.base_url,
+                "model": config.model,
+                "adapter": config.adapter,
+                "context_window": config.context_window,
+                "full_auto": bool(getattr(self, "_agent_v2_full_auto", False)),
+                "api_key_set": bool(config.api_key),
+            }})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, result=str)
+    def agent_update_engine_settings(self, settings_json: str) -> str:
+        """Apply engine settings (context window, adapter, full auto).
+
+        Settings land in process env vars, which every v2 run reads at
+        start — no restart needed. The UI persists them and re-applies
+        on launch.
+        """
+        try:
+            data = json.loads(settings_json) if settings_json else {}
+            if not isinstance(data, dict):
+                data = {}
+            context_window = data.get("context_window")
+            if context_window:
+                os.environ["NEXA_CONTEXT_WINDOW"] = str(
+                    max(2048, int(context_window)))
+            adapter = data.get("adapter")
+            if adapter in ("xml", "native"):
+                os.environ["NEXCODER_ADAPTER"] = adapter
+            if "full_auto" in data:
+                self._agent_v2_full_auto = bool(data.get("full_auto"))
+            return json.dumps({"success": True})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(result=str)
+    def agent_permissions_list(self) -> str:
+        """Commands the user allowed with "always" for this project."""
+        try:
+            if not self._current_project_path:
+                return json.dumps({"success": True, "commands": []})
+            path = (Path(self._current_project_path) / ".nexcoder"
+                    / "permissions.json")
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                commands = [str(c) for c in data.get("allowed_commands", [])]
+            except (OSError, json.JSONDecodeError, ValueError):
+                commands = []
+            return json.dumps({"success": True, "commands": sorted(commands)})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, result=str)
+    def agent_permissions_remove(self, command: str) -> str:
+        """Revoke a previously always-allowed command."""
+        try:
+            root = self._require_project_path()
+            path = Path(root) / ".nexcoder" / "permissions.json"
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                commands = [str(c) for c in data.get("allowed_commands", [])]
+            except (OSError, json.JSONDecodeError, ValueError):
+                commands = []
+            remaining = [c for c in commands if c != command]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps({"allowed_commands": sorted(set(remaining))},
+                           indent=2),
+                encoding="utf-8")
+            return json.dumps({"success": True, "commands": sorted(remaining)})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(result=str)
+    def agent_memory_get(self) -> str:
+        """The project memory file the agent injects into every run."""
+        try:
+            if not self._current_project_path:
+                return json.dumps({"success": True, "content": ""})
+            from nexcoder.agent.core.memory import load_project_memory
+            return json.dumps({
+                "success": True,
+                "content": load_project_memory(self._current_project_path)})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, result=str)
+    def agent_memory_save(self, content: str) -> str:
+        """Replace the project memory (edit/clear from the settings UI)."""
+        try:
+            root = self._require_project_path()
+            path = Path(root) / ".nexcoder" / "MEMORY.md"
+            text = (content or "").strip()
+            if text:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text + "\n", encoding="utf-8")
+            elif path.exists():
+                path.write_text("", encoding="utf-8")
+            return json.dumps({"success": True})
+        except Exception as e:
+            return slot_error_response(e)
 
     @Slot(str, result=str)
     def agent_revert_run(self, checkpoint_id: str) -> str:

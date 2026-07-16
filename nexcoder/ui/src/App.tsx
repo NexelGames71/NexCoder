@@ -17,7 +17,8 @@ import {
   writeFile,
   saveFileAs,
   getRecentProjects,
-  updateAiSettings
+  updateAiSettings,
+  updateEngineSettings
 } from './services/bridge';
 import { getLanguageFromExtension } from './utils/languageMap';
 
@@ -34,6 +35,15 @@ export default function App() {
     updateAiSettings(agentSettings.aiEndpoint, agentSettings.aiModel)
       .catch((e) => console.error('Failed to sync AI settings to backend:', e));
   }, [agentSettings.aiEndpoint, agentSettings.aiModel]);
+
+  // Same for engine settings (context window, adapter, full auto)
+  useEffect(() => {
+    updateEngineSettings({
+      context_window: agentSettings.contextWindow,
+      adapter: agentSettings.adapter,
+      full_auto: agentSettings.fullAuto,
+    }).catch((e) => console.error('Failed to sync engine settings:', e));
+  }, [agentSettings.contextWindow, agentSettings.adapter, agentSettings.fullAuto]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
