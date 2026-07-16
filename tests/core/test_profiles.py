@@ -5,8 +5,9 @@ from nexcoder.agent.core.profiles import (
 )
 
 
-def test_all_six_modes_exist():
-    for mode in ("agent", "ask", "edit", "debug", "review", "scan"):
+def test_all_modes_exist():
+    for mode in ("agent", "plan", "ask", "edit", "debug", "review",
+                 "scan", "terminal"):
         profile = get_v2_profile(mode)
         assert isinstance(profile, V2Profile)
         assert profile.system_prompt.strip()
@@ -25,7 +26,7 @@ def test_unknown_mode_raises():
 
 
 def test_read_only_modes_have_no_mutating_tools():
-    for mode in ("ask", "review", "scan"):
+    for mode in ("ask", "plan", "review", "scan"):
         belt = build_belt_for(get_v2_profile(mode))
         names = set(belt.names)
         assert not names & {"write_file", "edit_file", "run_command",
@@ -34,7 +35,7 @@ def test_read_only_modes_have_no_mutating_tools():
 
 
 def test_write_modes_have_full_belt():
-    for mode in ("agent", "edit", "debug"):
+    for mode in ("agent", "edit", "debug", "terminal"):
         belt = build_belt_for(get_v2_profile(mode))
         names = set(belt.names)
         assert {"read_file", "edit_file", "write_file", "run_command",

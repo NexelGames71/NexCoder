@@ -36,14 +36,14 @@ export default function App() {
       .catch((e) => console.error('Failed to sync AI settings to backend:', e));
   }, [agentSettings.aiEndpoint, agentSettings.aiModel]);
 
-  // Same for engine settings (context window, adapter, full auto)
+  // Same for engine settings (context window, adapter, autonomy)
   useEffect(() => {
     updateEngineSettings({
       context_window: agentSettings.contextWindow,
       adapter: agentSettings.adapter,
-      full_auto: agentSettings.fullAuto,
+      autonomy: agentSettings.autonomy,
     }).catch((e) => console.error('Failed to sync engine settings:', e));
-  }, [agentSettings.contextWindow, agentSettings.adapter, agentSettings.fullAuto]);
+  }, [agentSettings.contextWindow, agentSettings.adapter, agentSettings.autonomy]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);

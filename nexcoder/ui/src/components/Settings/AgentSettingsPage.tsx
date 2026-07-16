@@ -84,24 +84,31 @@ export default function AgentSettingsPage({ onClose }: AgentSettingsPageProps) {
                   style={compactInput}
                 >
                   <option value="agent">Agent</option>
+                  <option value="plan">Plan</option>
                   <option value="ask">Ask</option>
                   <option value="edit">Edit</option>
                   <option value="debug">Debug</option>
                   <option value="review">Review</option>
                   <option value="scan">Scan</option>
+                  <option value="terminal">Terminal</option>
                 </select>
               </div>
               <div style={rowStyle}>
                 <div>
-                  <span style={labelStyle}>Full Auto</span>
-                  <div style={hintStyle}>Skip command permission prompts. Risky commands (push, hard reset, recursive delete) are still blocked.</div>
+                  <span style={labelStyle}>Autonomy</span>
+                  <div style={hintStyle}>Which commands run without asking. Read-only commands never prompt; risky commands (installs, network, git push, deletes) are denied outright in Full auto.</div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={settings.fullAuto}
-                  onChange={(e) => updateSetting('fullAuto', e.target.checked)}
-                  style={{ accentColor: 'var(--accent-purple)' }}
-                />
+                <select
+                  className="input"
+                  value={settings.autonomy}
+                  onChange={(e) => updateSetting('autonomy', e.target.value as 'read_only' | 'ask' | 'risky_only' | 'full_auto')}
+                  style={{ width: '140px', padding: '4px 8px' }}
+                >
+                  <option value="read_only">Read only</option>
+                  <option value="ask">Ask every time</option>
+                  <option value="risky_only">Ask for risky</option>
+                  <option value="full_auto">Full auto</option>
+                </select>
               </div>
               <div style={rowStyle}>
                 <span style={labelStyle}>Show Timeline Details</span>

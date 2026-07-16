@@ -179,6 +179,7 @@ export async function getEngineSettings(): Promise<any> {
 
 export async function updateEngineSettings(settings: {
   context_window?: number; adapter?: string; full_auto?: boolean;
+  autonomy?: string;
 }): Promise<any> {
   return callBridge('agent_update_engine_settings', JSON.stringify(settings));
 }

@@ -19,6 +19,8 @@ export interface AgentSettings {
   contextWindow: number;
   adapter: 'xml' | 'native';
   fullAuto: boolean;
+  /** Command autonomy: read_only | ask | risky_only | full_auto */
+  autonomy: 'read_only' | 'ask' | 'risky_only' | 'full_auto';
   settingsVersion?: number;
 }
 
@@ -53,6 +55,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextWindow: 32768,
   adapter: 'xml',
   fullAuto: false,
+  autonomy: 'ask',
   settingsVersion: SETTINGS_VERSION,
 };
 

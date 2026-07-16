@@ -45,6 +45,10 @@ export default function ChatInput({ input, onChange, onSend, onOpenSkillPicker, 
 
   const getPlaceholder = () => {
     switch (activeMode) {
+      case 'plan':
+        return 'Describe the feature to plan — nothing gets modified... (/ to change skill)';
+      case 'terminal':
+        return 'Describe a command-line task (build, git, tooling)... (/ to change skill)';
       case 'edit':
         return 'Describe changes to make in active file... (/ to change skill)';
       case 'agent':
@@ -84,16 +88,18 @@ export default function ChatInput({ input, onChange, onSend, onOpenSkillPicker, 
               <Plus size={14} />
             </button>
             <ActiveSkillChip onClick={onOpenSkillPicker} />
-            <label className="tool-access-control" title="Choose which tools the agent may execute">
-              {settings.toolAccess === 'read_only' ? <Eye size={10} /> : <ShieldCheck size={10} />}
+            <label className="tool-access-control" title="Autonomy: which commands run without asking">
+              {settings.autonomy === 'read_only' ? <Eye size={10} /> : <ShieldCheck size={10} />}
               <select
-                value={settings.toolAccess}
-                onChange={(event) => updateSetting('toolAccess', event.target.value as 'full' | 'read_only')}
+                value={settings.autonomy}
+                onChange={(event) => updateSetting('autonomy', event.target.value as 'read_only' | 'ask' | 'risky_only' | 'full_auto')}
                 disabled={isStreaming}
-                aria-label="Agent tool access"
+                aria-label="Agent autonomy level"
               >
-                <option value="full">Full access</option>
                 <option value="read_only">Read only</option>
+                <option value="ask">Ask every time</option>
+                <option value="risky_only">Ask for risky</option>
+                <option value="full_auto">Full auto</option>
               </select>
             </label>
           </div>

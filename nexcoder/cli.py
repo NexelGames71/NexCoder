@@ -190,9 +190,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["agent", "ask", "edit", "debug", "review", "scan"],
+        choices=["agent", "plan", "ask", "edit", "debug", "review",
+                 "scan", "terminal"],
         default="agent",
         help="Agent mode/profile to use.",
+    )
+    parser.add_argument(
+        "--autonomy",
+        choices=["read_only", "ask", "risky_only", "full_auto"],
+        default="ask",
+        help="Command autonomy: read_only (inspect only), ask (prompt for "
+             "every command), risky_only (prompt only for risky commands), "
+             "full_auto (never prompt; risky commands denied).",
     )
     parser.add_argument(
         "--apply",
@@ -330,9 +339,14 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
            renderer: ConsoleRenderer) -> int:
     """Run the v2 agentic core engine (direct edits, permission-gated commands)."""
     from nexcoder.agent.core.backend_config import load_backend_config
+    from nexcoder.agent.core.command_policy import AutonomyGate
     from nexcoder.agent.core.loop import AgentLoop
-    from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
+    from nexcoder.agent.core.permissions import AllowlistGate
     from nexcoder.agent.core.profiles import build_belt_for, get_v2_profile
+    from nexcoder.agent.core.project_commands import (
+        detect_project_commands, render_project_commands,
+    )
+    from nexcoder.agent.core.rules import load_project_rules
     from nexcoder.agent.core.repo_map import build_repo_map, render_repo_map, save_repo_map
     from nexcoder.agent.core.session_store import SessionStore
     from nexcoder.agent.core.skills_catalog import render_skills_catalog
@@ -368,12 +382,12 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
         def request(self, *, tool: str, detail: str) -> str:
             return DENY
 
-    if args.auto:
-        gate = FullAutoGate()
-    elif args.jsonl:
-        gate = AllowlistGate(DenyGate(), project_root)  # unattended: never hang
+    autonomy = "full_auto" if args.auto else args.autonomy
+    if args.jsonl and autonomy == "ask":
+        inner = DenyGate()  # unattended: never hang on a prompt
     else:
-        gate = AllowlistGate(ConsolePermissionGate(), project_root)
+        inner = ConsolePermissionGate()
+    gate = AllowlistGate(AutonomyGate(inner, autonomy), project_root)
 
     repo_map = build_repo_map(project_root)
     save_repo_map(project_root, repo_map)
@@ -398,6 +412,14 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
                 print(f"  [{mark}] {todo['content']}")
 
     profile = get_v2_profile(getattr(args, "mode", "agent") or "agent")
+    extra_sections = [render_repo_map(repo_map),
+                      render_skills_catalog(str(project_root))]
+    rules = load_project_rules(project_root)
+    if rules:
+        extra_sections.append(rules)
+    commands = render_project_commands(detect_project_commands(project_root))
+    if commands:
+        extra_sections.append(commands)
     loop = AgentLoop(
         project_root=project_root,
         model=AgentModelClient(ModelConnector()),
@@ -409,8 +431,7 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
         permission_gate=gate,
         max_turns=profile.max_turns,
         context_window=config.context_window,
-        extra_system=(render_repo_map(repo_map) + "\n\n"
-                      + render_skills_catalog(str(project_root))),
+        extra_system="\n\n".join(extra_sections),
         session_store=SessionStore(project_root),
     )
     result = loop.run(task, preload_skill=skill_id)

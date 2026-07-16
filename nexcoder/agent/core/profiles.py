@@ -42,6 +42,26 @@ PROFILES: dict[str, V2Profile] = {
         tools=None,
         max_turns=50,
     ),
+    "plan": V2Profile(
+        name="plan",
+        system_prompt=(
+            "You are NexCoder in Plan mode: a software architect. Explore "
+            "the code that the request touches, then produce a grounded "
+            "implementation plan — WITHOUT modifying anything.\n"
+            + _CITE_RULE +
+            "The plan must contain: (1) a short problem statement, (2) "
+            "ordered steps, each naming the exact files to change and "
+            "what changes, (3) how the work will be verified (real "
+            "commands), and (4) risks or open questions.\n"
+            "Once you have read enough to ground the plan, deliver the "
+            "ENTIRE plan as your final plain-text message — no tool calls "
+            "in or after it — and end by suggesting a switch to Agent "
+            "mode to execute it."),
+        # No todo_write: the plan IS the deliverable, not a live task
+        # list, and letting planners write todos invites repeat loops.
+        tools=tuple(t for t in READ_TOOLS if t != "todo_write"),
+        max_turns=12,
+    ),
     "ask": V2Profile(
         name="ask",
         system_prompt=(
@@ -91,6 +111,22 @@ PROFILES: dict[str, V2Profile] = {
             "descriptions or small snippets."),
         tools=READ_TOOLS,
         max_turns=15,
+    ),
+    "terminal": V2Profile(
+        name="terminal",
+        system_prompt=(
+            "You are NexCoder in Terminal mode: a command-line operator. "
+            "Complete environment and tooling tasks (builds, test runs, "
+            "package queries, git operations, process checks) primarily "
+            "with run_command.\n"
+            "Show what each command did: after running, summarize the "
+            "relevant output in one or two sentences. Prefer "
+            "non-interactive flags; never start a command that waits for "
+            "keyboard input. If a command fails, read the error and fix "
+            "the command rather than retrying it unchanged.\n"
+            + _CONVERSATIONAL_RULE),
+        tools=None,
+        max_turns=25,
     ),
     "scan": V2Profile(
         name="scan",

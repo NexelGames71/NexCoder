@@ -11,12 +11,19 @@ from PySide6.QtCore import QThread, Signal
 
 from nexcoder.agent.cancellation import CancellationToken
 from nexcoder.agent.core.backend_config import load_backend_config
+from nexcoder.agent.core.command_policy import AUTONOMY_LEVELS, AutonomyGate
 from nexcoder.agent.core.editor_context import (
     render_chat_history, render_editor_context,
 )
 from nexcoder.agent.core.loop import AgentLoop
-from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
-from nexcoder.agent.core.profiles import build_belt_for, get_v2_profile
+from nexcoder.agent.core.permissions import AllowlistGate
+from nexcoder.agent.core.profiles import (
+    READ_TOOLS, V2Profile, build_belt_for, get_v2_profile,
+)
+from nexcoder.agent.core.project_commands import (
+    detect_project_commands, render_project_commands,
+)
+from nexcoder.agent.core.rules import load_project_rules
 from nexcoder.agent.core.repo_map import build_repo_map, render_repo_map, save_repo_map
 from nexcoder.agent.core.session_store import SessionStore
 from nexcoder.agent.core.skills_catalog import render_skills_catalog
@@ -71,17 +78,22 @@ class AgentV2Worker(QThread):
                  gate: UiPermissionGate, full_auto: bool = False,
                  skill_id: str = "", mode: str = "agent",
                  editor_context: dict | None = None,
-                 history: list[dict] | None = None) -> None:
+                 history: list[dict] | None = None,
+                 autonomy: str = "ask") -> None:
         super().__init__()
         self._project_root = project_root
         self._prompt = prompt
         self._gate = gate
-        self._full_auto = full_auto
         self._skill_id = skill_id
-        self._mode = mode if mode in ("agent", "ask", "edit", "debug",
-                                      "review", "scan") else "agent"
+        self._mode = mode if mode in ("agent", "plan", "ask", "edit",
+                                      "debug", "review", "scan",
+                                      "terminal") else "agent"
         self._editor_context = editor_context
         self._history = history
+        # full_auto is the legacy flag; the autonomy level supersedes it.
+        if full_auto and autonomy == "ask":
+            autonomy = "full_auto"
+        self._autonomy = autonomy if autonomy in AUTONOMY_LEVELS else "ask"
         self.cancel_token = CancellationToken()
 
     def cancel(self) -> None:
@@ -91,11 +103,30 @@ class AgentV2Worker(QThread):
     def run(self) -> None:
         try:
             config = load_backend_config()
-            permission_gate = (FullAutoGate() if self._full_auto
-                               else AllowlistGate(self._gate, self._project_root))
+            # Allowlist first (exact matches skip everything), then the
+            # autonomy level, then the UI prompt as the final arbiter.
+            permission_gate = AllowlistGate(
+                AutonomyGate(self._gate, self._autonomy),
+                self._project_root)
             repo_map = build_repo_map(self._project_root)
             save_repo_map(self._project_root, repo_map)
             profile = get_v2_profile(self._mode)
+            # Read-only autonomy strips mutating tools no matter the mode
+            # — safety is structural, not prompt-hoped.
+            if self._autonomy == "read_only" and profile.tools is None:
+                profile = V2Profile(name=profile.name,
+                                    system_prompt=profile.system_prompt,
+                                    tools=READ_TOOLS,
+                                    max_turns=profile.max_turns)
+            extra_sections = [render_repo_map(repo_map),
+                              render_skills_catalog(self._project_root)]
+            rules = load_project_rules(self._project_root)
+            if rules:
+                extra_sections.append(rules)
+            commands = render_project_commands(
+                detect_project_commands(self._project_root))
+            if commands:
+                extra_sections.append(commands)
             loop = AgentLoop(
                 project_root=self._project_root,
                 model=AgentModelClient(ModelConnector()),
@@ -108,8 +139,7 @@ class AgentV2Worker(QThread):
                 permission_gate=permission_gate,
                 max_turns=profile.max_turns,
                 context_window=config.context_window,
-                extra_system=(render_repo_map(repo_map) + "\n\n"
-                              + render_skills_catalog(self._project_root)),
+                extra_system="\n\n".join(extra_sections),
                 session_store=SessionStore(self._project_root),
                 cancel_token=self.cancel_token,
             )

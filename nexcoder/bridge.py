@@ -492,6 +492,7 @@ class Bridge(QObject):
             self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
                 project_root, prompt, self._agent_v2_gate,
+                autonomy=str(getattr(self, "_agent_v2_autonomy", "ask")),
                 full_auto=bool(getattr(self, "_agent_v2_full_auto", False)),
                 skill_id=skill_id, mode=mode or "agent",
                 editor_context=editor_context, history=history)
@@ -626,6 +627,7 @@ class Bridge(QObject):
                 "adapter": config.adapter,
                 "context_window": config.context_window,
                 "full_auto": bool(getattr(self, "_agent_v2_full_auto", False)),
+                "autonomy": str(getattr(self, "_agent_v2_autonomy", "ask")),
                 "api_key_set": bool(config.api_key),
             }})
         except Exception as e:
@@ -652,6 +654,11 @@ class Bridge(QObject):
                 os.environ["NEXCODER_ADAPTER"] = adapter
             if "full_auto" in data:
                 self._agent_v2_full_auto = bool(data.get("full_auto"))
+            autonomy = data.get("autonomy")
+            if autonomy:
+                from nexcoder.agent.core.command_policy import AUTONOMY_LEVELS
+                if autonomy in AUTONOMY_LEVELS:
+                    self._agent_v2_autonomy = autonomy
             return json.dumps({"success": True})
         except Exception as e:
             return slot_error_response(e)
