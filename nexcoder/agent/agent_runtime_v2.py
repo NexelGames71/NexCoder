@@ -11,6 +11,7 @@ from PySide6.QtCore import QThread, Signal
 
 from nexcoder.agent.cancellation import CancellationToken
 from nexcoder.agent.core.backend_config import load_backend_config
+from nexcoder.agent.core.editor_context import render_editor_context
 from nexcoder.agent.core.loop import AgentLoop
 from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
 from nexcoder.agent.core.profiles import build_belt_for, get_v2_profile
@@ -66,7 +67,8 @@ class AgentV2Worker(QThread):
 
     def __init__(self, project_root: str, prompt: str,
                  gate: UiPermissionGate, full_auto: bool = False,
-                 skill_id: str = "", mode: str = "agent") -> None:
+                 skill_id: str = "", mode: str = "agent",
+                 editor_context: dict | None = None) -> None:
         super().__init__()
         self._project_root = project_root
         self._prompt = prompt
@@ -75,6 +77,7 @@ class AgentV2Worker(QThread):
         self._skill_id = skill_id
         self._mode = mode if mode in ("agent", "ask", "edit", "debug",
                                       "review", "scan") else "agent"
+        self._editor_context = editor_context
         self.cancel_token = CancellationToken()
 
     def cancel(self) -> None:
@@ -106,7 +109,9 @@ class AgentV2Worker(QThread):
                 session_store=SessionStore(self._project_root),
                 cancel_token=self.cancel_token,
             )
-            result = loop.run(self._prompt, preload_skill=self._skill_id or None)
+            task = self._prompt + render_editor_context(
+                self._editor_context, self._project_root)
+            result = loop.run(task, preload_skill=self._skill_id or None)
         except Exception as exc:  # worker must never crash the app
             result = {"success": False, "status": "error", "final_text": str(exc),
                       "run_id": "", "checkpoint_id": None, "mutated_files": [],

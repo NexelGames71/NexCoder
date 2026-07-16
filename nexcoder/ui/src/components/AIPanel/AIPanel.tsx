@@ -37,6 +37,7 @@ export default function AIPanel() {
   } = useChatStore();
 
   const activeFile = useEditorStateStore(selectActiveFile);
+  const activeSelection = useEditorStateStore((s) => s.activeSelection);
   const { projectPath } = useProjectStore();
   const { settings } = useAgentStore();
   const [input, setInput] = useState('');
@@ -275,9 +276,26 @@ export default function AIPanel() {
           || 'Follow the skill instructions on the current project state.';
       }
     }
+    // Auto-attach what the user is looking at (active file + selection).
+    const selection = useEditorStateStore.getState().activeSelection;
+    const editorContext = {
+      active_file: activeFile?.path || null,
+      selection: selection && selection.text.trim()
+        ? {
+            path: selection.path,
+            start_line: selection.startLine,
+            end_line: selection.endLine,
+            text: selection.text,
+          }
+        : null,
+    };
+    const contextJson = (editorContext.active_file || editorContext.selection)
+      ? JSON.stringify(editorContext)
+      : '';
+
     useAgentRunStore.getState().start(userMessage.id);
     try {
-      const result = await agentRunV2(task, skillId, mode);
+      const result = await agentRunV2(task, skillId, mode, contextJson);
       if (result && result.success === false) {
         // Surface bridge-level refusals (no project open, agent busy)
         // instead of leaving the panel silently empty.
@@ -314,7 +332,9 @@ export default function AIPanel() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', background: 'var(--bg-deep)', padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
             <Code size={12} style={{ color: 'var(--accent-purple)' }} />
             <span className="truncate" style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-              Active File: {activeFile.name}
+              {activeSelection && activeSelection.text.trim()
+                ? `Attached: ${activeFile.name} · lines ${activeSelection.startLine}-${activeSelection.endLine} selected`
+                : `Active File: ${activeFile.name}`}
             </span>
           </div>
         </div>

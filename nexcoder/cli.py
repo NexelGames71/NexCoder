@@ -357,6 +357,10 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
     skill_id, task = parse_slash_command(prompt, known_ids)
     if args.skill:
         skill_id, task = args.skill, prompt
+    if args.active_file:
+        from nexcoder.agent.core.editor_context import render_editor_context
+        task += render_editor_context(
+            {"active_file": args.active_file}, project_root)
 
     class ConsolePermissionGate:
         def request(self, *, tool: str, detail: str) -> str:

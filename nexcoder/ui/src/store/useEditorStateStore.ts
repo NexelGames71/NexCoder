@@ -9,9 +9,20 @@ import { EditorGroup, OpenFile } from '../types';
  * re-renders cheap and stops a font-size tweak from invalidating
  * the whole editor surface.
  */
+/** The user's current text selection in the editor — auto-attached to
+ *  AI runs so "fix this" refers to the selected code. */
+export interface EditorSelection {
+  path: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+}
+
 interface EditorState {
   editorGroups: EditorGroup[];
   activeGroupId: string;
+  activeSelection: EditorSelection | null;
+  setActiveSelection: (selection: EditorSelection | null) => void;
 
   openFile: (file: OpenFile, groupId?: string) => void;
   setActiveGroup: (id: string) => void;
@@ -48,6 +59,8 @@ const mutateGroup = (
 export const useEditorStateStore = create<EditorState>((set, get) => ({
   editorGroups: [newGroup()],
   activeGroupId: 'g1',
+  activeSelection: null,
+  setActiveSelection: (selection) => set({ activeSelection: selection }),
 
   openFile: (file, groupId) =>
     set((state) => {

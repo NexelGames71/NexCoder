@@ -175,8 +175,10 @@ export async function agentReview(prompt: string, context: any): Promise<any> {
 }
 
 // Agent v2 (agentic core engine)
-export async function agentRunV2(prompt: string, skillId = '', mode = 'agent'): Promise<any> {
-  return callBridge('agent_run_v2', prompt, skillId, mode);
+export async function agentRunV2(
+  prompt: string, skillId = '', mode = 'agent', contextJson = '',
+): Promise<any> {
+  return callBridge('agent_run_v2', prompt, skillId, mode, contextJson);
 }
 
 export async function agentPermissionResponse(requestId: string, decision: 'allow' | 'allow_always' | 'deny'): Promise<any> {

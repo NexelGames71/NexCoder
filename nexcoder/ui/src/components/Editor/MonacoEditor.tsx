@@ -13,9 +13,32 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
   const { updateFileContent, setFileDirty } = useEditorStateStore();
   const { settings } = useEditorSettingsStore();
   const editorRef = useRef<any>(null);
+  // The mount handler runs once; the ref keeps listeners pointed at the
+  // file currently shown in this editor instance.
+  const fileRef = useRef(file);
+  fileRef.current = file;
 
   const handleEditorDidMount = (editor: any, monaco: Monaco) => {
     editorRef.current = editor;
+
+    // Track the selection so AI runs can auto-attach the code the user
+    // is looking at ("fix this" without pasting).
+    editor.onDidChangeCursorSelection(() => {
+      const model = editor.getModel();
+      const sel = editor.getSelection();
+      if (!model || !sel) return;
+      const text = model.getValueInRange(sel);
+      useEditorStateStore.getState().setActiveSelection(
+        text
+          ? {
+              path: fileRef.current.path,
+              startLine: sel.startLineNumber,
+              endLine: sel.endLineNumber,
+              text,
+            }
+          : null,
+      );
+    });
 
     // Define custom theme matching NexCoder palette
     monaco.editor.defineTheme('nexcoder-theme', {

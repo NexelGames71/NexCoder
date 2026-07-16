@@ -409,18 +409,34 @@ class Bridge(QObject):
 
     # Legacy per-mode slots delegate to the v2 engine so every surface —
     # including older callers — runs on the same AgentLoop profiles.
-    # context_json is accepted for signature compatibility but ignored;
-    # v2 gathers its own context (repo map, skills, project memory).
+    # Their legacy context shape (currentFile/selection) is translated to
+    # the v2 editor-context shape; everything else v2 gathers itself.
+
+    @staticmethod
+    def _legacy_context(context_json: str) -> str:
+        try:
+            legacy = json.loads(context_json) if context_json else {}
+        except ValueError:
+            legacy = {}
+        if not isinstance(legacy, dict):
+            legacy = {}
+        translated = {
+            "active_file": legacy.get("currentFile"),
+            "selection": legacy.get("selection"),
+        }
+        return json.dumps(translated) if any(translated.values()) else ""
 
     @Slot(str, str, result=str)
     def agent_ask(self, prompt: str, context_json: str = "") -> str:
         """AI Ask mode — read-only questions (v2 engine)."""
-        return self.agent_run_v2(prompt, "", "ask")
+        return self.agent_run_v2(prompt, "", "ask",
+                                 self._legacy_context(context_json))
 
     @Slot(str, str, result=str)
     def agent_edit(self, prompt: str, context_json: str = "") -> str:
         """AI Edit mode — precise scoped edits (v2 engine)."""
-        return self.agent_run_v2(prompt, "", "edit")
+        return self.agent_run_v2(prompt, "", "edit",
+                                 self._legacy_context(context_json))
 
     @Slot(str, str, result=str)
     def agent_run(self, prompt: str, context_json: str = "") -> str:
@@ -438,22 +454,31 @@ class Bridge(QObject):
                 "create a codebase map",
             )
         )
-        return self.agent_run_v2(prompt, "", "scan" if scan_requested else "agent")
+        return self.agent_run_v2(prompt, "", "scan" if scan_requested else "agent",
+                                 self._legacy_context(context_json))
 
-    @Slot(str, str, str, result=str)
-    def agent_run_v2(self, prompt: str, skill_id: str = "", mode: str = "agent") -> str:
+    @Slot(str, str, str, str, result=str)
+    def agent_run_v2(self, prompt: str, skill_id: str = "",
+                     mode: str = "agent", context_json: str = "") -> str:
         """v2 engine for every AI mode (agent/ask/edit/debug/review/scan)."""
         try:
             if self._agent_v2_worker is not None and self._agent_v2_worker.isRunning():
                 return json.dumps({"success": False, "error": "Agent is already running"})
             project_root = self._require_project_path()
             from nexcoder.agent.agent_runtime_v2 import AgentV2Worker, UiPermissionGate
+            try:
+                editor_context = json.loads(context_json) if context_json else None
+            except ValueError:
+                editor_context = None
+            if not isinstance(editor_context, dict):
+                editor_context = None
             # The UI's permission card is driven by the loop's own
             # permission_request event (relayed below); the gate only blocks.
             self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
                 project_root, prompt, self._agent_v2_gate,
-                skill_id=skill_id, mode=mode or "agent")
+                skill_id=skill_id, mode=mode or "agent",
+                editor_context=editor_context)
             # Explicitly queued to real @Slot methods: PySide connects plain
             # Python callables as DIRECT connections, which would run the
             # relay on the worker thread — and QWebChannel silently drops
@@ -532,12 +557,14 @@ class Bridge(QObject):
     @Slot(str, str, result=str)
     def agent_debug(self, prompt: str, context_json: str = "") -> str:
         """AI Debug mode — reproduce, root-cause, fix (v2 engine)."""
-        return self.agent_run_v2(prompt, "", "debug")
+        return self.agent_run_v2(prompt, "", "debug",
+                                 self._legacy_context(context_json))
 
     @Slot(str, str, result=str)
     def agent_review(self, prompt: str, context_json: str = "") -> str:
         """AI Review mode — read-only code audit (v2 engine)."""
-        return self.agent_run_v2(prompt, "", "review")
+        return self.agent_run_v2(prompt, "", "review",
+                                 self._legacy_context(context_json))
 
     @Slot(str, result=str)
     def agent_approve_diff(self, diff_id: str) -> str:
