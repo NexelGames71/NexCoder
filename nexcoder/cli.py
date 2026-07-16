@@ -1,6 +1,6 @@
 ﻿"""NexCoder command-line agent.
 
-This module exposes the same Hermes agent loop used by the desktop app,
+This module exposes the same v2 agentic engine used by the desktop app,
 but renders progress as terminal output so agent behavior is easy to
 inspect without the React panel.
 """
@@ -19,8 +19,6 @@ from typing import Any
 from dotenv import load_dotenv
 
 from nexcoder.agent.errors import AgentContractError, AgentError, envelope_from_exception
-from nexcoder.agent.hermes_runtime import HermesAgentLoop
-from nexcoder.agent.mode_profiles import get_profile
 from nexcoder.agent.patch_generator import PatchGenerator
 from nexcoder.services.checkpoint import CheckpointManager
 
@@ -215,12 +213,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--active-file",
         default=None,
         help="Optional active file path to include in task context.",
-    )
-    parser.add_argument(
-        "--engine",
-        choices=["v1", "v2"],
-        default=os.getenv("NEXCODER_ENGINE", "v2"),
-        help="Agent engine: v1 (legacy Hermes loop) or v2 (agentic core).",
     )
     parser.add_argument(
         "--adapter",
@@ -442,54 +434,9 @@ def run_cli(argv: list[str] | None = None) -> int:
     renderer = ConsoleRenderer(verbose=args.verbose, jsonl=args.jsonl)
     renderer.header(prompt, project_root, args.mode)
 
-    if args.engine == "v2":
-        try:
-            return run_v2(args, prompt, project_root, renderer)
-        except Exception as exc:
-            renderer.error(exc)
-            return 1
-
-    context: dict[str, Any] = {
-        "project_path": str(project_root),
-        "projectPath": str(project_root),
-        "mode": args.mode,
-    }
-    if args.active_file:
-        context["currentFile"] = args.active_file
-        context["current_file"] = args.active_file
-
     try:
-        profile = get_profile(args.mode)
-        context["_mode_profile"] = profile
-        context["task_type"] = profile.task_type
-
-        result = HermesAgentLoop(project_root).run(
-            prompt,
-            context,
-            {
-                "on_status": renderer.status,
-                "on_timeline": renderer.timeline_item,
-                "on_chunk": renderer.chunk,
-                "on_diff": renderer.diff,
-            },
-        )
-        renderer.result(result)
-
-        if args.apply and renderer.diffs:
-            applied = safe_apply_diffs(project_root, renderer.diffs)
-            if args.jsonl:
-                renderer.event("apply", {"files": [str(path) for path in applied]})
-            else:
-                print()
-                if applied:
-                    print("Applied files")
-                    for path in applied:
-                        print(f"  {path.relative_to(project_root).as_posix()}")
-                else:
-                    print("No applicable full-file patch payloads were produced.")
-
-        return 0 if result.get("success") else 1
-    except (AgentError, Exception) as exc:
+        return run_v2(args, prompt, project_root, renderer)
+    except Exception as exc:
         renderer.error(exc)
         return 1
 

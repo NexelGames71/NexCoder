@@ -89,7 +89,6 @@ class Bridge(QObject):
         from nexcoder.ipc.terminal import TerminalHandler
         from nexcoder.ipc.git_ops import GitHandler
         from nexcoder.ipc.dialogs import DialogHandler
-        from nexcoder.agent.runtime import AgentRuntime
         from nexcoder.services.project_manager import ProjectManager
         from nexcoder.services.appwrite_client import AppwriteClient
 
@@ -97,7 +96,6 @@ class Bridge(QObject):
         self._terminal = TerminalHandler()
         self._git = GitHandler()
         self._dialogs = DialogHandler(main_window)
-        self._agent = AgentRuntime()
         self._project = ProjectManager()
         self._appwrite = AppwriteClient()
 
@@ -105,18 +103,24 @@ class Bridge(QObject):
         self._terminal.output_received.connect(self.terminal_output.emit)
         self._terminal.process_exited.connect(self.terminal_exited.emit)
 
-        # Connect agent signals
-        self._agent.stream_chunk.connect(self.agent_stream.emit)
-        self._agent.status_update.connect(self.agent_status.emit)
-        self._agent.diff_ready.connect(self.agent_diff.emit)
-        self._agent.completed.connect(self.agent_complete.emit)
-
         # Connect filesystem watcher
         self._fs.tree_changed.connect(self.on_fs_changed)
 
         self._current_project_path: str | None = None
         self._agent_v2_worker = None
         self._agent_v2_gate = None
+        self._session_stores: dict[str, Any] = {}
+        self._redactor = None
+
+    def _session_store(self, project_root: str):
+        """Per-project chat session store (cached)."""
+        from nexcoder.agent.session import AgentSessionStore
+        key = os.path.abspath(project_root)
+        store = self._session_stores.get(key)
+        if store is None:
+            store = AgentSessionStore(key)
+            self._session_stores[key] = store
+        return store
 
     def _require_project_path(self) -> str:
         if not self._current_project_path:
@@ -515,7 +519,7 @@ class Bridge(QObject):
         proceeds unpersisted.
         """
         try:
-            store = self._agent.get_session_store(os.path.abspath(project_root))
+            store = self._session_store(os.path.abspath(project_root))
             history: list[dict] = []
             if session_id:
                 try:
@@ -565,7 +569,7 @@ class Bridge(QObject):
             return result_json
         try:
             result = json.loads(result_json)
-            store = self._agent.get_session_store(
+            store = self._session_store(
                 os.path.abspath(self._current_project_path))
             store.append_message(
                 session_id, "assistant",
@@ -753,37 +757,6 @@ class Bridge(QObject):
                                  self._legacy_context(context_json))
 
     @Slot(str, result=str)
-    def agent_approve_diff(self, diff_id: str) -> str:
-        """Approve a pending diff from the agent."""
-        try:
-            self._agent.approve_diff(diff_id, self._require_project_path())
-            try:
-                tree = self._fs.get_file_tree(self._require_project_path())
-                self.file_tree_updated.emit(json.dumps(tree))
-            except Exception:
-                logger.debug("Could not refresh file tree after diff apply", exc_info=True)
-            return json.dumps({"success": True})
-        except Exception as e:
-            return slot_error_response(e)
-
-    @Slot(str, result=str)
-    def agent_approve_patchset(self, diff_ids_json: str) -> str:
-        """Apply all selected agent changes atomically and verify the writes."""
-        try:
-            diff_ids = json.loads(diff_ids_json) if diff_ids_json else []
-            if not isinstance(diff_ids, list) or not all(isinstance(item, str) for item in diff_ids):
-                raise ValueError("Patchset ids must be a JSON list of strings")
-            result = self._agent.approve_patchset(diff_ids, self._require_project_path())
-            try:
-                tree = self._fs.get_file_tree(self._require_project_path())
-                self.file_tree_updated.emit(json.dumps(tree))
-            except Exception:
-                logger.debug("Could not refresh file tree after patchset apply", exc_info=True)
-            return json.dumps({"success": True, **result})
-        except Exception as e:
-            return slot_error_response(e)
-
-    @Slot(str, result=str)
     def agent_apply_patchset(self, patches_json: str) -> str:
         """Apply a JSON-serialized list of patches atomically (from UI approval).
 
@@ -807,42 +780,18 @@ class Bridge(QObject):
             logger.error(f"Failed to apply patchset from UI: {e}")
             return slot_error_response(e)
 
-    @Slot(str, result=str)
-    def agent_reject_diff(self, diff_id: str) -> str:
-        """Reject a pending diff from the agent."""
-        try:
-            self._agent.reject_diff(diff_id, self._require_project_path())
-            return json.dumps({"success": True})
-        except Exception as e:
-            return slot_error_response(e)
-
     @Slot(str, str, result=str)
     def update_ai_settings(self, endpoint: str, model: str) -> str:
-        """Update AI model connector settings from the UI."""
-        try:
-            self._agent.set_ai_settings(endpoint, model)
-            return json.dumps({"success": True})
-        except Exception as e:
-            return slot_error_response(e)
+        """Point the engine at a different backend/model.
 
-    @Slot(result=str)
-    def agent_get_memory(self) -> str:
-        """Return the agent memory for the current project as JSON."""
+        Env vars are the single source of truth — every v2 run reads
+        them at start via ``load_backend_config``.
+        """
         try:
-            project_root = self._require_project_path()
-            mem = self._agent.get_memory(project_root)
-            return json.dumps({"success": True, "memory": mem._data})
-        except Exception as e:
-            return slot_error_response(e)
-
-    @Slot(str, str, result=str)
-    def agent_set_memory(self, key: str, value_json: str) -> str:
-        """Set a memory key to a JSON value for the current project."""
-        try:
-            project_root = self._require_project_path()
-            mem = self._agent.get_memory(project_root)
-            value = json.loads(value_json)
-            mem.set(key, value)
+            if endpoint:
+                os.environ["NEXA_API_URL"] = endpoint
+            if model:
+                os.environ["NEXA_MODEL"] = model
             return json.dumps({"success": True})
         except Exception as e:
             return slot_error_response(e)
@@ -952,8 +901,11 @@ class Bridge(QObject):
         ``error_kind == "agent_cancelled"``.
         """
         try:
-            cancelled = self._agent.cancel_active_run("cancelled by user")
-            return json.dumps({"success": True, "cancelled": cancelled})
+            worker = self._agent_v2_worker
+            if worker is None or not worker.isRunning():
+                return json.dumps({"success": True, "cancelled": False})
+            self.agent_cancel_v2()
+            return json.dumps({"success": True, "cancelled": True})
         except Exception as e:
             return slot_error_response(e)
 
@@ -961,7 +913,9 @@ class Bridge(QObject):
     def agent_is_active(self) -> str:
         """True while a run is in progress. UI uses this to gate the cancel button."""
         try:
-            return json.dumps({"success": True, "active": self._agent.is_active()})
+            worker = self._agent_v2_worker
+            active = worker is not None and worker.isRunning()
+            return json.dumps({"success": True, "active": active})
         except Exception as e:
             return slot_error_response(e)
 
@@ -980,7 +934,7 @@ class Bridge(QObject):
             root = project_path or self._current_project_path
             if not root:
                 return json.dumps({"success": True, "sessions": []})
-            store = self._agent.get_session_store(os.path.abspath(root))
+            store = self._session_store(os.path.abspath(root))
             sessions = [m.to_dict() for m in store.list_sessions()]
             return json.dumps({"success": True, "sessions": sessions})
         except Exception as e:
@@ -996,7 +950,7 @@ class Bridge(QObject):
                     RuntimeError("No project open"),
                     code="no_active_project",
                 )
-            store = self._agent.get_session_store(os.path.abspath(root))
+            store = self._session_store(os.path.abspath(root))
             meta, messages = store.load_session(session_id)
             return json.dumps({
                 "success": True,
@@ -1030,7 +984,7 @@ class Bridge(QObject):
                     RuntimeError("No project open"),
                     code="no_active_project",
                 )
-            store = self._agent.get_session_store(os.path.abspath(root))
+            store = self._session_store(os.path.abspath(root))
             removed = store.delete_session(session_id)
             return json.dumps({"success": True, "removed": removed})
         except Exception as e:
@@ -1047,7 +1001,7 @@ class Bridge(QObject):
                     code="no_active_project",
                 )
             archived = json.loads(archived_json) if archived_json else True
-            store = self._agent.get_session_store(os.path.abspath(root))
+            store = self._session_store(os.path.abspath(root))
             meta = store.archive_session(session_id, bool(archived))
             return json.dumps({"success": True, "metadata": meta.to_dict()})
         except Exception as e:
@@ -1063,7 +1017,7 @@ class Bridge(QObject):
                     RuntimeError("No project open"),
                     code="no_active_project",
                 )
-            store = self._agent.get_session_store(os.path.abspath(root))
+            store = self._session_store(os.path.abspath(root))
             meta = store.create_session(title=title or "New session", mode=mode or "ask")
             return json.dumps({"success": True, "metadata": meta.to_dict()})
         except Exception as e:
@@ -1094,7 +1048,10 @@ class Bridge(QObject):
         it displays (e.g. pasted logs).
         """
         try:
-            result = self._agent._redactor.redact(text or "")
+            if self._redactor is None:
+                from nexcoder.agent.redaction import SecretRedactor
+                self._redactor = SecretRedactor()
+            result = self._redactor.redact(text or "")
             return json.dumps({
                 "success": True,
                 "text": result.text,

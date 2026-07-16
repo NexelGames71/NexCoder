@@ -1,11 +1,9 @@
 import os
 import tempfile
-import json
 from nexcoder.agent.patch_generator import PatchGenerator
-from nexcoder.agent.memory import AgentMemory
 
 
-def test_apply_patchset_and_memory():
+def test_apply_patchset():
     with tempfile.TemporaryDirectory() as tmp:
         project_root = tmp
         # create an original file
@@ -40,13 +38,7 @@ def test_apply_patchset_and_memory():
         bar_path = os.path.join(tmp, "bar.txt")
         assert os.path.isfile(bar_path)
 
-        # AgentMemory
-        mem = AgentMemory(project_root)
-        mem.set("notes", ["first"])
-        assert mem.get("notes") == ["first"]
-        mem.append("notes", "second")
-        assert mem.get("notes") == ["first", "second"]
 
 if __name__ == '__main__':
-    test_apply_patchset_and_memory()
+    test_apply_patchset()
     print('OK')

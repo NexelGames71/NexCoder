@@ -40,41 +40,14 @@ class BridgeSlotTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = self._tmp.name
 
-        # Stub the agent runtime with a thin object that exposes the
-        # few methods the bridge calls. We don't use a MagicMock here
-        # because the session-related methods need real behaviour.
-        class _StubAgent:
-            def __init__(self) -> None:
-                self._redactor = SecretRedactor()
-                self._project = MagicMock()
-                self._project.get_recent_projects.return_value = []
-                self._session_stores: dict[str, AgentSessionStore] = {}
-
-            def is_active(self) -> bool:
-                return False
-
-            def cancel_active_run(self, reason: str = "") -> bool:
-                return False
-
-            def get_session_store(self, project_root: str) -> AgentSessionStore:
-                if project_root in self._session_stores:
-                    return self._session_stores[project_root]
-                store = AgentSessionStore(project_root)
-                self._session_stores[project_root] = store
-                return store
-
-            def approve_patchset(self, diff_ids: list[str], project_root: str) -> dict:
-                return {
-                    "checkpoint_id": "checkpoint-test",
-                    "files": ["index.html"],
-                    "validation": {"success": True, "files_checked": 1},
-                }
-
-        self.agent = _StubAgent()
+        # The bridge no longer wraps a runtime object; session stores,
+        # redaction, and cancellation are bridge-owned (v2 engine).
+        _ = (AgentSessionStore, SecretRedactor)  # imports stay exercised
 
         bridge = Bridge(None)
-        bridge._agent = self.agent
-        bridge._project = self.agent._project
+        project = MagicMock()
+        project.get_recent_projects.return_value = []
+        bridge._project = project
         bridge._current_project_path = self.root
         self.bridge = bridge
 
@@ -86,19 +59,18 @@ class BridgeSlotTests(unittest.TestCase):
         self.assertFalse(out["cancelled"])
 
     def test_cancel_agent_when_active(self):
-        # Override the stub to report an active run.
-        original = self.agent.cancel_active_run
-        self.agent.cancel_active_run = lambda reason="": True
-        try:
-            out = json.loads(self.bridge.cancel_agent())
-        finally:
-            self.agent.cancel_active_run = original
+        worker = MagicMock()
+        worker.isRunning.return_value = True
+        self.bridge._agent_v2_worker = worker
+        out = json.loads(self.bridge.cancel_agent())
         self.assertTrue(out["success"])
         self.assertTrue(out["cancelled"])
+        worker.cancel.assert_called_once()
 
     def test_agent_is_active(self):
-        # Override the stub to report an active run.
-        self.agent.is_active = lambda: True
+        worker = MagicMock()
+        worker.isRunning.return_value = True
+        self.bridge._agent_v2_worker = worker
         out = json.loads(self.bridge.agent_is_active())
         self.assertTrue(out["success"])
         self.assertTrue(out["active"])
@@ -172,12 +144,6 @@ class BridgeSlotTests(unittest.TestCase):
         out = json.loads(self.bridge.archive_session(self.root, meta.session_id, "true"))
         self.assertTrue(out["success"])
         self.assertTrue(out["metadata"]["archived"])
-
-    def test_approve_patchset_slot_returns_validation(self):
-        out = json.loads(self.bridge.agent_approve_patchset(json.dumps(["diff-a", "diff-b"])))
-        self.assertTrue(out["success"])
-        self.assertEqual(out["checkpoint_id"], "checkpoint-test")
-        self.assertTrue(out["validation"]["success"])
 
     # ── redact_text ──────────────────────────────────────────────────
 

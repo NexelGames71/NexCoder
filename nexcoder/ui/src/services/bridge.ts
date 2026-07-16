@@ -149,32 +149,7 @@ export async function gitLog(root?: string, count?: number): Promise<any> {
   return callBridge('git_log', root || '', count || 20);
 }
 
-// Agent / AI
-export async function agentAsk(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_ask', prompt, JSON.stringify(context));
-}
-
-export async function agentEdit(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_edit', prompt, JSON.stringify(context));
-}
-
-export async function agentRun(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_run', prompt, JSON.stringify(context));
-}
-
-export async function agentScan(context: any): Promise<any> {
-  return callBridge('agent_scan', JSON.stringify(context));
-}
-
-export async function agentDebug(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_debug', prompt, JSON.stringify(context));
-}
-
-export async function agentReview(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_review', prompt, JSON.stringify(context));
-}
-
-// Agent v2 (agentic core engine)
+// Agent v2 (agentic core engine — every AI mode)
 export async function agentRunV2(
   prompt: string, skillId = '', mode = 'agent', contextJson = '',
 ): Promise<any> {

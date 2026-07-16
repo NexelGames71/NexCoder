@@ -19,18 +19,9 @@ export default function AIPanel() {
     activeSkill,
     isStreaming,
     addMessage,
-    appendToLastMessage,
     setStreaming,
     clearChat,
     clearScanSteps,
-    addScanStep,
-    updateTaskStatus,
-    addTaskStep,
-    addTaskStepItem,
-    addTaskChangedFile,
-    addPendingDiff,
-    setTaskFinalAnswer,
-    setTaskPlan,
     setSkills,
     setActiveMode,
     activeSessionId,
@@ -45,8 +36,6 @@ export default function AIPanel() {
   const [showSkillPicker, setShowSkillPicker] = useState(false);
   const [skillFilter, setSkillFilter] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  // Track active task id so we can update it
-  const activeTaskIdRef = useRef<string | null>(null);
   const previousProjectRef = useRef<string | null>(projectPath);
 
   const openSkillPicker = useCallback(() => {
@@ -118,58 +107,10 @@ export default function AIPanel() {
     };
   }, [setSkills]);
 
-  // â”€â”€ Wire bridge signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Run completion (agent_complete carries the session id) ────────
   useEffect(() => {
     const bridge = getBridge();
     if (!bridge) return;
-
-    const onChunk = (chunk: string) => {
-      appendToLastMessage(chunk);
-    };
-
-    const onStatus = (statusJson: string) => {
-      try {
-        const { status, message, id, action, timeline_item } = JSON.parse(statusJson);
-        const taskId = id || activeTaskIdRef.current;
-        if (status === 'plan_update' && taskId) {
-          setTaskPlan(taskId, JSON.parse(message));
-          return;
-        }
-        if (status === 'scanning' && taskId) {
-          addScanStep(taskId, message);
-        }
-        if (taskId) {
-          if (timeline_item) {
-            addTaskStepItem(taskId, timeline_item);
-            return;
-          }
-          const taskStatus = status === 'error' ? 'error' : status === 'awaiting_approval' ? 'awaiting_approval' : 'running';
-          const label = action ? `${action}: ${message}` : message;
-          updateTaskStatus(taskId, taskStatus, label);
-          addTaskStep(taskId, label, taskStatus);
-        }
-      } catch { /* ignore parse errors */ }
-    };
-
-    const onDiff = (diffJson: string) => {
-      try {
-        const diff = JSON.parse(diffJson);
-        addPendingDiff(diff);
-        const taskId = activeTaskIdRef.current;
-        if (taskId && diff.file) {
-          addTaskChangedFile(taskId, diff.file, diff.action || 'modify');
-          const stepLabel = diff.operation === 'move'
-            ? `Staged move: ${diff.source} -> ${diff.file}`
-            : diff.action === 'mkdir'
-              ? `Staged folder: ${diff.file}`
-              : diff.action === 'rmdir'
-                ? `Staged folder cleanup: ${diff.file}`
-                : `Generated patch for ${diff.file}`;
-          addTaskStep(taskId, stepLabel, 'awaiting_approval');
-          updateTaskStatus(taskId, 'awaiting_approval', 'Waiting for approval');
-        }
-      } catch { /* ignore parse errors */ }
-    };
 
     const onComplete = (resultJson: string) => {
       try {
@@ -178,65 +119,15 @@ export default function AIPanel() {
         if (result.session_id) {
           setActiveSessionId(result.session_id);
         }
-        // Mark last message as no longer streaming
-        useChatStore.setState((state) => {
-          const updated = [...state.messages];
-          if (updated.length > 0) {
-            const last = updated[updated.length - 1];
-            if (last.role === 'assistant') {
-              updated[updated.length - 1] = { ...last, isStreaming: false };
-            }
-          }
-          return { messages: updated };
-        });
-        if (activeTaskIdRef.current) {
-          // Contract failures get a dedicated banner so the user sees that
-          // the model failed to follow the agent contract, not just a
-          // generic error. The last_response is included so they can
-          // see what the model actually said.
-          const isContractFailure = result.error_kind === 'agent_contract_failure';
-          const errorLabel = isContractFailure
-            ? `Agent contract failed after ${result.attempts ?? '?'} attempt(s). Last response: ${(result.last_response || '').slice(0, 200) || '(empty)'}`
-            : (result.error || 'Done');
-          // Attach the structured final_answer (and task_type) the
-          // runner produced, when present, so the chat message can
-          // render the FinalAnswerCard in addition to the streamed
-          // text. Read-only task types (question / scan / review)
-          // always include this object.
-          const taskType = result.task_type || result.mode;
-          const finalAnswer = result.final_answer || null;
-          if (finalAnswer) {
-            setTaskFinalAnswer(activeTaskIdRef.current, finalAnswer, taskType);
-          }
-          if (result.plan) {
-            setTaskPlan(activeTaskIdRef.current, result.plan);
-          }
-          const hasPendingPatch = result.success && Number(result.patches || 0) > 0;
-          if (hasPendingPatch) {
-            updateTaskStatus(activeTaskIdRef.current, 'awaiting_approval', 'Waiting for approval');
-            addTaskStep(activeTaskIdRef.current, 'Patch ready for review', 'awaiting_approval');
-          } else {
-            updateTaskStatus(activeTaskIdRef.current, result.success ? 'complete' : 'error', result.success ? 'Done' : errorLabel);
-            addTaskStep(activeTaskIdRef.current, result.success ? 'Final report complete' : errorLabel, result.success ? 'complete' : 'error');
-          }
-          activeTaskIdRef.current = null;
-        }
       } catch { setStreaming(false); }
     };
 
     // Qt signals are exposed with snake_case names on the bridge object
-    if (bridge.agent_stream) bridge.agent_stream.connect(onChunk);
-    if (bridge.agent_status) bridge.agent_status.connect(onStatus);
-    if (bridge.agent_diff) bridge.agent_diff.connect(onDiff);
     if (bridge.agent_complete) bridge.agent_complete.connect(onComplete);
-
     return () => {
-      if (bridge.agent_stream) bridge.agent_stream.disconnect(onChunk);
-      if (bridge.agent_status) bridge.agent_status.disconnect(onStatus);
-      if (bridge.agent_diff) bridge.agent_diff.disconnect(onDiff);
       if (bridge.agent_complete) bridge.agent_complete.disconnect(onComplete);
     };
-  }, [appendToLastMessage, addScanStep, updateTaskStatus, addTaskStep, addTaskStepItem, addTaskChangedFile, addPendingDiff, setStreaming, setTaskFinalAnswer, setTaskPlan, setActiveSessionId]);
+  }, [setStreaming, setActiveSessionId]);
 
 
   const handleSend = async () => {
@@ -260,7 +151,6 @@ export default function AIPanel() {
     addMessage(userMessage);
     setInput('');
     setStreaming(true);
-    activeTaskIdRef.current = null;
     setShowSkillPicker(false);
 
     // Slash command (/commit fix the bug) wins; otherwise the picker's

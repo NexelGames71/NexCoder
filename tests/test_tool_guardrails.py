@@ -1,63 +1,46 @@
 import json
 import tempfile
 import unittest
-from pathlib import Path
 
-from nexcoder.agent.executor import AgentExecutor
-from nexcoder.agent.tool_call_parser import ParsedToolCall
-from nexcoder.agent.tool_guardrails import ToolGuardrailController
-from nexcoder.agent.tool_registry import ToolRegistry
+from nexcoder.agent.tool_guardrails import (
+    ToolGuardrailConfig, ToolGuardrailController,
+)
 from nexcoder.agent.trajectory import AgentTrajectoryRecorder
 
 
 class ToolGuardrailTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name)
-        self.registry = ToolRegistry(self.root)
+    def test_duplicate_exact_tool_call_is_blocked(self):
+        guardrails = ToolGuardrailController()
+        first = guardrails.before_call("list_directory", {"path": "."})
+        guardrails.after_call("list_directory", {"path": "."}, {"success": True})
+        second = guardrails.before_call("list_directory", {"path": "."})
 
-    def test_duplicate_exact_tool_call_is_skipped_as_timeline_item(self):
-        timeline: list[dict] = []
-        executor = AgentExecutor(
-            self.registry,
-            on_timeline=timeline.append,
-            guardrails=ToolGuardrailController(),
-        )
-        call = ParsedToolCall(
-            type="tool_call",
-            tool="list_directory",
-            args={"path": "."},
-            raw="",
-        )
+        self.assertTrue(first.allows_execution)
+        self.assertFalse(second.allows_execution)
+        self.assertEqual(second.code, "duplicate_tool_call")
 
-        _first_item, first_observation = executor.execute(call)
-        second_item, second_observation = executor.execute(call)
+    def test_mutation_resets_failure_tracking(self):
+        # A repeat-exempt command (verify -> fix -> re-verify) that failed
+        # is blocked until a successful mutation resets failure tracking.
+        config = ToolGuardrailConfig(
+            exempt_repeat_tools=frozenset({"run_command"}))
+        guardrails = ToolGuardrailController(config)
+        guardrails.after_call("run_command", {"command": "pytest"},
+                              {"success": False})
+        blocked = guardrails.before_call("run_command", {"command": "pytest"})
+        self.assertFalse(blocked.allows_execution)
 
-        self.assertIn('"success": true', first_observation.lower())
-        self.assertEqual(second_item["status"], "skipped")
-        self.assertIsNone(second_item["error"])
-        self.assertEqual(second_item["guardrail"]["code"], "duplicate_tool_call")
-        payload = json.loads(second_observation)
-        self.assertEqual(payload["result"]["error_code"], "duplicate_tool_call")
+        guardrails.note_mutation()
+        retried = guardrails.before_call("run_command", {"command": "pytest"})
+        self.assertTrue(retried.allows_execution)
 
-    def test_repeated_same_tool_failures_get_guardrail_metadata(self):
-        executor = AgentExecutor(
-            self.registry,
-            guardrails=ToolGuardrailController(),
-        )
-        calls = [
-            ParsedToolCall("tool_call", "read_file", {"path": "missing_a.py"}, ""),
-            ParsedToolCall("tool_call", "read_file", {"path": "missing_b.py"}, ""),
-        ]
-
-        executor.execute(calls[0])
-        item, observation = executor.execute(calls[1])
-
-        self.assertEqual(item["status"], "failed")
-        self.assertEqual(item["guardrail"]["code"], "same_tool_failure_warning")
-        payload = json.loads(observation)
-        self.assertEqual(payload["result"]["guardrail"]["code"], "same_tool_failure_warning")
+    def test_compaction_resets_duplicate_tracking(self):
+        guardrails = ToolGuardrailController()
+        guardrails.before_call("read_file", {"path": "a.py"})
+        guardrails.after_call("read_file", {"path": "a.py"}, {"success": True})
+        guardrails.note_context_compacted()
+        decision = guardrails.before_call("read_file", {"path": "a.py"})
+        self.assertTrue(decision.allows_execution)
 
 
 class TrajectoryRecorderTests(unittest.TestCase):
