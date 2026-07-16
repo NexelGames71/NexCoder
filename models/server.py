@@ -25,11 +25,11 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import torch
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -50,6 +50,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Optional bearer-token auth. Set NEXCODER_API_KEY to require it before
+# exposing the server beyond localhost. Empty = open (fine on 127.0.0.1).
+REQUIRED_API_KEY = os.getenv("NEXCODER_API_KEY", "").strip()
+
+
+def require_api_key(authorization: str = Header(default="")) -> None:
+    """Enforce ``Authorization: Bearer <key>`` when a key is configured."""
+    if not REQUIRED_API_KEY:
+        return
+    token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    if token != REQUIRED_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
 # ── Global State ──────────────────────────────────────────────────────────────
 model = None
 tokenizer = None
@@ -62,16 +75,42 @@ LLAMA_INFERENCE_LOCK = Lock()
 
 
 # ── Request / Response Schemas ────────────────────────────────────────────────
+def _coerce_content(value: Any) -> str:
+    """Normalize OpenAI message content to a plain string.
+
+    Third-party clients (Cursor, Continue, aider) send ``content`` as a
+    list of parts like ``[{"type": "text", "text": "..."}]`` or, rarely,
+    ``None``. Flatten any of these to text so the model sees a string.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item))
+        return "".join(parts)
+    return str(value)
+
+
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    model_config = {"extra": "ignore"}
+    role: str = "user"
+    content: Any = ""
 
 
 class ChatCompletionRequest(BaseModel):
+    # Ignore the extra sampling fields OpenAI clients send (presence_penalty,
+    # frequency_penalty, tools, response_format, ...) instead of 422-ing.
+    model_config = {"extra": "ignore"}
     model: str = "default"
     messages: list[ChatMessage]
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=4096, ge=1, le=32768)
+    max_tokens: int | None = Field(default=4096)
     stream: bool = False
     top_p: float = Field(default=0.9, ge=0.0, le=1.0)
     stop: list[str] | None = None
@@ -79,7 +118,7 @@ class ChatCompletionRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/v1/models")
-async def list_models():
+async def list_models(_auth: None = Depends(require_api_key)):
     """List available models (OpenAI-compatible)."""
     return {
         "object": "list",
@@ -111,7 +150,8 @@ async def health():
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest,
+                           _auth: None = Depends(require_api_key)):
     """OpenAI-compatible chat completions endpoint."""
     global model, tokenizer
 
@@ -120,7 +160,10 @@ async def chat_completions(request: ChatCompletionRequest):
     if tokenizer is None and MODEL_KIND != "gguf":
         raise HTTPException(status_code=503, detail="Tokenizer not loaded yet")
 
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+    messages = [{"role": m.role, "content": _coerce_content(m.content)}
+                for m in request.messages]
+    if request.max_tokens is None:
+        request.max_tokens = 4096
     if MODEL_KIND == "gguf":
         return await _llama_chat_completions(request, messages)
 

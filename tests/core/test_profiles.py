@@ -1,0 +1,44 @@
+import pytest
+
+from nexcoder.agent.core.profiles import (
+    V2Profile, build_belt_for, get_v2_profile,
+)
+
+
+def test_all_six_modes_exist():
+    for mode in ("agent", "ask", "edit", "debug", "review", "scan"):
+        profile = get_v2_profile(mode)
+        assert isinstance(profile, V2Profile)
+        assert profile.system_prompt.strip()
+        assert profile.max_turns >= 4
+
+
+def test_unknown_mode_raises():
+    with pytest.raises(ValueError):
+        get_v2_profile("nonsense")
+
+
+def test_read_only_modes_have_no_mutating_tools():
+    for mode in ("ask", "review", "scan"):
+        belt = build_belt_for(get_v2_profile(mode))
+        names = set(belt.names)
+        assert not names & {"write_file", "edit_file", "run_command",
+                            "create_directory", "move_path"}, mode
+        assert {"read_file", "grep", "glob"} <= names, mode
+
+
+def test_write_modes_have_full_belt():
+    for mode in ("agent", "edit", "debug"):
+        belt = build_belt_for(get_v2_profile(mode))
+        names = set(belt.names)
+        assert {"read_file", "edit_file", "write_file", "run_command",
+                "todo_write"} <= names, mode
+
+
+def test_read_only_belt_rejects_write(tmp_path):
+    from nexcoder.agent.core.tools.base import ToolContext
+    belt = build_belt_for(get_v2_profile("ask"))
+    ctx = ToolContext(project_root=tmp_path, emit=lambda _e: None, run_id="t")
+    result = belt.execute("write_file", {"path": "x.txt", "content": "no"}, ctx)
+    assert result["error_code"] == "unknown_tool"
+    assert not (tmp_path / "x.txt").exists()
