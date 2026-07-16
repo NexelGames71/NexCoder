@@ -407,74 +407,42 @@ class Bridge(QObject):
 
     # ── Agent / AI ────────────────────────────────────────────────────
 
-    @Slot(str, str, result=str)
-    def agent_ask(self, prompt: str, context_json: str) -> str:
-        """AI Ask mode — read-only questions."""
-        try:
-            context = json.loads(context_json) if context_json else {}
-            context["project_path"] = self._current_project_path
-            context["prompt"] = prompt
-            # Default ask tasks to the "question" task type so the loop
-            # produces a structured final_answer even when the runtime
-            # did not classify the prompt itself.
-            context.setdefault("task_type", "question")
-            self._agent.run_mode("ask", prompt, context)
-            return json.dumps({"success": True, "mode": "ask"})
-        except Exception as e:
-            return slot_error_response(e)
+    # Legacy per-mode slots delegate to the v2 engine so every surface —
+    # including older callers — runs on the same AgentLoop profiles.
+    # context_json is accepted for signature compatibility but ignored;
+    # v2 gathers its own context (repo map, skills, project memory).
 
     @Slot(str, str, result=str)
-    def agent_edit(self, prompt: str, context_json: str) -> str:
-        """AI Edit mode — controlled single-file edits."""
-        try:
-            context = json.loads(context_json) if context_json else {}
-            context["project_path"] = self._current_project_path
-            context["prompt"] = prompt
-            context.setdefault("task_type", "edit")
-            self._agent.run_mode("edit", prompt, context)
-            return json.dumps({"success": True, "mode": "edit"})
-        except Exception as e:
-            return slot_error_response(e)
+    def agent_ask(self, prompt: str, context_json: str = "") -> str:
+        """AI Ask mode — read-only questions (v2 engine)."""
+        return self.agent_run_v2(prompt, "", "ask")
 
     @Slot(str, str, result=str)
-    def agent_run(self, prompt: str, context_json: str) -> str:
-        """AI Agent mode — multi-step autonomous."""
-        try:
-            context = json.loads(context_json) if context_json else {}
-            context["project_path"] = self._current_project_path
-            context["prompt"] = prompt
-            lower_prompt = prompt.lower()
-            scan_requested = any(
-                phrase in lower_prompt
-                for phrase in (
-                    "scan the codebase",
-                    "scan codebase",
-                    "scan the project",
-                    "scan through",
-                    "codebase scan",
-                    "project scan",
-                    "create a codebase map",
-                    "understand the codebase",
-                    "understand the project",
-                )
+    def agent_edit(self, prompt: str, context_json: str = "") -> str:
+        """AI Edit mode — precise scoped edits (v2 engine)."""
+        return self.agent_run_v2(prompt, "", "edit")
+
+    @Slot(str, str, result=str)
+    def agent_run(self, prompt: str, context_json: str = "") -> str:
+        """AI Agent mode — multi-step autonomous (v2 engine)."""
+        lower_prompt = prompt.lower()
+        scan_requested = any(
+            phrase in lower_prompt
+            for phrase in (
+                "scan the codebase",
+                "scan codebase",
+                "scan the project",
+                "scan through",
+                "codebase scan",
+                "project scan",
+                "create a codebase map",
             )
-            if scan_requested:
-                context["project_path"] = self._require_project_path()
-                context["task_type"] = "scan"
-                self._agent.start_task("scan", "Scan the project and create a codebase map.", context)
-                return json.dumps({"success": True, "mode": "scan"})
-            # Let the runtime pick the task type from the prompt; the
-            # default is "implement" but questions and scans get
-            # re-classified automatically.
-            context.setdefault("task_type", "implement")
-            self._agent.run_mode("agent", prompt, context)
-            return json.dumps({"success": True, "mode": "agent"})
-        except Exception as e:
-            return slot_error_response(e)
+        )
+        return self.agent_run_v2(prompt, "", "scan" if scan_requested else "agent")
 
-    @Slot(str, str, result=str)
-    def agent_run_v2(self, prompt: str, skill_id: str = "") -> str:
-        """v2 agentic engine: direct edits with checkpoints, gated commands."""
+    @Slot(str, str, str, result=str)
+    def agent_run_v2(self, prompt: str, skill_id: str = "", mode: str = "agent") -> str:
+        """v2 engine for every AI mode (agent/ask/edit/debug/review/scan)."""
         try:
             if self._agent_v2_worker is not None and self._agent_v2_worker.isRunning():
                 return json.dumps({"success": False, "error": "Agent is already running"})
@@ -484,7 +452,8 @@ class Bridge(QObject):
             # permission_request event (relayed below); the gate only blocks.
             self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
-                project_root, prompt, self._agent_v2_gate, skill_id=skill_id)
+                project_root, prompt, self._agent_v2_gate,
+                skill_id=skill_id, mode=mode or "agent")
             # Explicitly queued to real @Slot methods: PySide connects plain
             # Python callables as DIRECT connections, which would run the
             # relay on the worker thread — and QWebChannel silently drops
@@ -494,7 +463,8 @@ class Bridge(QObject):
             self._agent_v2_worker.finished_json.connect(
                 self._on_agent_v2_finished, Qt.ConnectionType.QueuedConnection)
             self._agent_v2_worker.start()
-            return json.dumps({"success": True, "mode": "agent_v2"})
+            return json.dumps({"success": True, "mode": mode or "agent",
+                               "engine": "v2"})
         except Exception as e:
             return slot_error_response(e)
 
@@ -555,42 +525,19 @@ class Bridge(QObject):
 
     @Slot(str, result=str)
     def agent_scan(self, context_json: str = "") -> str:
-        """Structured scan task; bypasses normal chat completions."""
-        try:
-            context = json.loads(context_json) if context_json else {}
-            context["project_path"] = self._require_project_path()
-            prompt = "Scan the project and create a codebase map."
-            context["task_type"] = "scan"
-            self._agent.start_task("scan", prompt, context)
-            return json.dumps({"success": True, "mode": "scan"})
-        except Exception as e:
-            return slot_error_response(e)
+        """Codebase scan — structured overview (v2 engine)."""
+        return self.agent_run_v2(
+            "Scan the project and create a codebase map.", "", "scan")
 
     @Slot(str, str, result=str)
-    def agent_debug(self, prompt: str, context_json: str) -> str:
-        """AI Debug mode — error-focused fixes."""
-        try:
-            context = json.loads(context_json) if context_json else {}
-            context["project_path"] = self._current_project_path
-            context["prompt"] = prompt
-            context.setdefault("task_type", "debug")
-            self._agent.run_mode("debug", prompt, context)
-            return json.dumps({"success": True, "mode": "debug"})
-        except Exception as e:
-            return slot_error_response(e)
+    def agent_debug(self, prompt: str, context_json: str = "") -> str:
+        """AI Debug mode — reproduce, root-cause, fix (v2 engine)."""
+        return self.agent_run_v2(prompt, "", "debug")
 
     @Slot(str, str, result=str)
-    def agent_review(self, prompt: str, context_json: str) -> str:
-        """AI Review mode — code audit."""
-        try:
-            context = json.loads(context_json) if context_json else {}
-            context["project_path"] = self._current_project_path
-            context["prompt"] = prompt
-            context.setdefault("task_type", "review")
-            self._agent.run_mode("review", prompt, context)
-            return json.dumps({"success": True, "mode": "review"})
-        except Exception as e:
-            return slot_error_response(e)
+    def agent_review(self, prompt: str, context_json: str = "") -> str:
+        """AI Review mode — read-only code audit (v2 engine)."""
+        return self.agent_run_v2(prompt, "", "review")
 
     @Slot(str, result=str)
     def agent_approve_diff(self, diff_id: str) -> str:

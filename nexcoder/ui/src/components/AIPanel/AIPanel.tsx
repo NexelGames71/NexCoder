@@ -7,7 +7,7 @@ import { useAgentStore } from '../../store/useAgentStore';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import SkillPicker from './SkillPicker';
-import { agentAsk, agentEdit, agentRunV2, agentScan, agentDebug, agentReview, getBridge, fetchSkills, onAgentEvent } from '../../services/bridge';
+import { agentRunV2, getBridge, fetchSkills, onAgentEvent } from '../../services/bridge';
 import AgentRunPanel from './AgentRunPanel';
 import { useAgentRunStore } from '../../store/useAgentRunStore';
 import './AIPanel.css';
@@ -24,7 +24,6 @@ export default function AIPanel() {
     clearChat,
     clearScanSteps,
     addScanStep,
-    addTask,
     updateTaskStatus,
     addTaskStep,
     addTaskStepItem,
@@ -34,7 +33,6 @@ export default function AIPanel() {
     setTaskPlan,
     setSkills,
     setActiveMode,
-    activeSessionId,
     setActiveSessionId,
   } = useChatStore();
 
@@ -239,199 +237,61 @@ export default function AIPanel() {
   }, [appendToLastMessage, addScanStep, updateTaskStatus, addTaskStep, addTaskStepItem, addTaskChangedFile, addPendingDiff, setStreaming, setTaskFinalAnswer, setTaskPlan, setActiveSessionId]);
 
 
-  const handleScanCodebase = async () => {
-    const prompt = 'Scan the project and create a codebase map.';
-
-    clearScanSteps();
-
-    const userMessage = {
-      id: Math.random().toString(),
-      role: 'user' as const,
-      content: prompt,
-      timestamp: Date.now(),
-      mode: 'scan' as const,
-    };
-
-    addMessage(userMessage);
-    setStreaming(true);
-
-    const assistantMessageId = Math.random().toString();
-    addMessage({
-      id: assistantMessageId,
-      role: 'assistant' as const,
-      content: '',
-      timestamp: Date.now(),
-      isStreaming: true,
-    });
-
-    const context = {
-      currentFile: activeFile?.path || null,
-      currentContent: activeFile?.content || null,
-      projectPath: projectPath || null,
-      selection: window.getSelection()?.toString() || null,
-      errorOutput: null,
-      sessionId: activeSessionId,
-      accessMode: settings.toolAccess,
-      maxToolIterations: settings.maxToolIterations,
-      scanStepDelayMs: settings.scanStepDelayMs,
-    };
-
-    activeTaskIdRef.current = assistantMessageId;
-    addTask({
-      id: assistantMessageId,
-      mode: 'scan' as const,
-      status: 'running',
-      message: 'Starting codebase scan...',
-      title: prompt,
-      steps: [{
-        id: `${assistantMessageId}-created`,
-        type: 'system',
-        label: 'Created scan task',
-        status: 'completed',
-        started_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        result_summary: 'Task created',
-        error: null,
-        timestamp: Date.now(),
-      }],
-      timestamp: Date.now(),
-    });
-
-    setShowSkillPicker(false);
-
-    try {
-      await agentScan(context);
-    } catch (e) {
-      console.error(e);
-      setStreaming(false);
-    }
-  };
-
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    if (isScanPrompt(input)) {
-      setInput('');
-      await handleScanCodebase();
-      return;
-    }
-
     clearScanSteps();
+
+    // Every mode runs on the v2 agentic core: events render in
+    // AgentRunPanel, not as a streamed chat message or task card.
+    // "Scan the project..." phrasing routes to the scan profile.
+    const mode = isScanPrompt(input) ? ('scan' as const) : activeMode;
 
     const userMessage = {
       id: Math.random().toString(),
       role: 'user' as const,
       content: input,
       timestamp: Date.now(),
-      mode: activeMode,
+      mode,
     };
 
     addMessage(userMessage);
     setInput('');
     setStreaming(true);
+    activeTaskIdRef.current = null;
+    setShowSkillPicker(false);
 
-    // Agent mode runs on the v2 agentic core: events render in
-    // AgentRunPanel, not as a streamed chat message or task card.
-    if (activeMode === 'agent') {
-      activeTaskIdRef.current = null;
-      setShowSkillPicker(false);
-      // Slash command (/commit fix the bug) wins; otherwise the picker's
-      // active skill preloads. Unknown /xyz passes through as plain text.
-      const knownIds = new Set(useChatStore.getState().skills.map((s) => s.id));
-      let task = userMessage.content;
-      let skillId = activeSkill || '';
-      const trimmed = task.trim();
-      if (trimmed.startsWith('/')) {
-        const [first, ...rest] = trimmed.slice(1).split(' ');
-        if (knownIds.has(first)) {
-          skillId = first;
-          task = rest.join(' ').trim()
-            || 'Follow the skill instructions on the current project state.';
-        }
+    // Slash command (/commit fix the bug) wins; otherwise the picker's
+    // active skill preloads. Unknown /xyz passes through as plain text.
+    const knownIds = new Set(useChatStore.getState().skills.map((s) => s.id));
+    let task = userMessage.content;
+    let skillId = activeSkill || '';
+    const trimmed = task.trim();
+    if (trimmed.startsWith('/')) {
+      const [first, ...rest] = trimmed.slice(1).split(' ');
+      if (knownIds.has(first)) {
+        skillId = first;
+        task = rest.join(' ').trim()
+          || 'Follow the skill instructions on the current project state.';
       }
-      useAgentRunStore.getState().start(userMessage.id);
-      try {
-        const result = await agentRunV2(task, skillId);
-        if (result && result.success === false) {
-          // Surface bridge-level refusals (no project open, agent busy)
-          // instead of leaving the panel silently empty.
-          useAgentRunStore.getState().handleEvent({
-            type: 'run_error',
-            payload: { error: result.error || 'The agent could not start.' },
-          });
-          setStreaming(false);
-        }
-      } catch (e) {
-        console.error(e);
+    }
+    useAgentRunStore.getState().start(userMessage.id);
+    try {
+      const result = await agentRunV2(task, skillId, mode);
+      if (result && result.success === false) {
+        // Surface bridge-level refusals (no project open, agent busy)
+        // instead of leaving the panel silently empty.
         useAgentRunStore.getState().handleEvent({
-          type: 'run_error', payload: { error: String(e) },
+          type: 'run_error',
+          payload: { error: result.error || 'The agent could not start.' },
         });
         setStreaming(false);
       }
-      return;
-    }
-
-    const assistantMessageId = Math.random().toString();
-    addMessage({
-      id: assistantMessageId,
-      role: 'assistant' as const,
-      content: '',
-      timestamp: Date.now(),
-      isStreaming: true,
-    });
-
-    const context = {
-      currentFile: activeFile?.path || null,
-      currentContent: activeFile?.content || null,
-      projectPath: projectPath || null,
-      selection: window.getSelection()?.toString() || null,
-      errorOutput: null,
-      activeSkill: activeSkill || null,
-      sessionId: activeSessionId,
-      accessMode: settings.toolAccess,
-      maxToolIterations: settings.maxToolIterations,
-    };
-
-    if (activeMode === 'edit') {
-      activeTaskIdRef.current = assistantMessageId;
-      addTask({
-        id: assistantMessageId,
-        mode: activeMode,
-        status: 'running',
-        message: 'Starting...',
-        title: userMessage.content,
-        steps: [{
-          id: `${assistantMessageId}-created`,
-          type: 'system',
-          label: 'Created agent task',
-          status: 'completed',
-          started_at: new Date().toISOString(),
-          completed_at: new Date().toISOString(),
-          result_summary: 'Task created',
-          error: null,
-          timestamp: Date.now(),
-        }],
-        timestamp: Date.now(),
-      });
-    } else {
-      activeTaskIdRef.current = null;
-    }
-
-    // Clear any leftover skill picker
-    setShowSkillPicker(false);
-
-    try {
-      if (activeMode === 'ask') {
-        await agentAsk(userMessage.content, context);
-      } else if (activeMode === 'edit') {
-        await agentEdit(userMessage.content, context);
-      } else if (activeMode === 'debug') {
-        await agentDebug(userMessage.content, context);
-      } else if (activeMode === 'review') {
-        await agentReview(userMessage.content, context);
-      }
     } catch (e) {
       console.error(e);
+      useAgentRunStore.getState().handleEvent({
+        type: 'run_error', payload: { error: String(e) },
+      });
       setStreaming(false);
     }
   };

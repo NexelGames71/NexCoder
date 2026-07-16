@@ -338,9 +338,9 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
            renderer: ConsoleRenderer) -> int:
     """Run the v2 agentic core engine (direct edits, permission-gated commands)."""
     from nexcoder.agent.core.backend_config import load_backend_config
-    from nexcoder.agent.core.belt_factory import build_default_belt
-    from nexcoder.agent.core.loop import AGENT_SYSTEM_PROMPT, AgentLoop
+    from nexcoder.agent.core.loop import AgentLoop
     from nexcoder.agent.core.permissions import AllowlistGate, FullAutoGate
+    from nexcoder.agent.core.profiles import build_belt_for, get_v2_profile
     from nexcoder.agent.core.repo_map import build_repo_map, render_repo_map, save_repo_map
     from nexcoder.agent.core.session_store import SessionStore
     from nexcoder.agent.core.skills_catalog import render_skills_catalog
@@ -401,15 +401,17 @@ def run_v2(args: argparse.Namespace, prompt: str, project_root: Path,
                 mark = {"pending": " ", "in_progress": ">", "completed": "x"}[todo["status"]]
                 print(f"  [{mark}] {todo['content']}")
 
+    profile = get_v2_profile(getattr(args, "mode", "agent") or "agent")
     loop = AgentLoop(
         project_root=project_root,
         model=AgentModelClient(ModelConnector()),
         adapter=get_adapter(adapter_name),
-        belt=build_default_belt(),
-        system_prompt=AGENT_SYSTEM_PROMPT,
+        belt=build_belt_for(profile),
+        system_prompt=profile.system_prompt,
+        trajectory_mode=profile.name,
         emit=emit,
         permission_gate=gate,
-        max_turns=50,
+        max_turns=profile.max_turns,
         context_window=config.context_window,
         extra_system=(render_repo_map(repo_map) + "\n\n"
                       + render_skills_catalog(str(project_root))),
