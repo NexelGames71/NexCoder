@@ -472,13 +472,23 @@ class Bridge(QObject):
                 editor_context = None
             if not isinstance(editor_context, dict):
                 editor_context = None
+            # Persist the prompt into the project chat history. The UI's
+            # active session rides in the context payload; without one a
+            # session is created so the run is never lost on restart.
+            session_id = None
+            if editor_context is not None:
+                session_id = editor_context.pop("session_id", None) or None
+                if not any(editor_context.values()):
+                    editor_context = None
+            session_id, history = self._persist_v2_prompt(
+                project_root, session_id, prompt, mode or "agent")
             # The UI's permission card is driven by the loop's own
             # permission_request event (relayed below); the gate only blocks.
             self._agent_v2_gate = UiPermissionGate(on_request=lambda *args: None)
             self._agent_v2_worker = AgentV2Worker(
                 project_root, prompt, self._agent_v2_gate,
                 skill_id=skill_id, mode=mode or "agent",
-                editor_context=editor_context)
+                editor_context=editor_context, history=history)
             # Explicitly queued to real @Slot methods: PySide connects plain
             # Python callables as DIRECT connections, which would run the
             # relay on the worker thread — and QWebChannel silently drops
@@ -489,9 +499,42 @@ class Bridge(QObject):
                 self._on_agent_v2_finished, Qt.ConnectionType.QueuedConnection)
             self._agent_v2_worker.start()
             return json.dumps({"success": True, "mode": mode or "agent",
-                               "engine": "v2"})
+                               "engine": "v2", "session_id": session_id})
         except Exception as e:
             return slot_error_response(e)
+
+    def _persist_v2_prompt(self, project_root: str, session_id: str | None,
+                           prompt: str, mode: str) -> tuple[str | None, list[dict]]:
+        """Append the user prompt to the chat session; create one if needed.
+
+        Returns ``(session_id, prior_messages)`` — the prior messages give
+        follow-up prompts their conversation context. History must never
+        block a run: any failure returns ``(None, [])`` and the run
+        proceeds unpersisted.
+        """
+        try:
+            store = self._agent.get_session_store(os.path.abspath(project_root))
+            history: list[dict] = []
+            if session_id:
+                try:
+                    history = [
+                        {"role": m.role, "content": m.content}
+                        for m in store.iter_messages(session_id)
+                    ][-12:]
+                    store.append_message(session_id, "user", prompt,
+                                         {"mode": mode})
+                    self._agent_v2_session_id = session_id
+                    return session_id, history
+                except (FileNotFoundError, ValueError):
+                    session_id = None
+            meta = store.create_session(mode=mode)
+            store.append_message(meta.session_id, "user", prompt,
+                                 {"mode": mode})
+            self._agent_v2_session_id = meta.session_id
+            return meta.session_id, []
+        except Exception:
+            self._agent_v2_session_id = None
+            return None, []
 
     @Slot(str)
     def _relay_agent_event(self, event_json: str) -> None:
@@ -500,6 +543,7 @@ class Bridge(QObject):
 
     @Slot(str)
     def _on_agent_v2_finished(self, result_json: str) -> None:
+        result_json = self._persist_v2_result(result_json)
         self.agent_complete.emit(result_json)
         try:
             if self._current_project_path:
@@ -507,6 +551,35 @@ class Bridge(QObject):
                 self.file_tree_updated.emit(json.dumps(tree))
         except Exception:
             pass
+
+    def _persist_v2_result(self, result_json: str) -> str:
+        """Record the run's final answer in the chat session.
+
+        Returns the result JSON with ``session_id`` attached so the UI
+        can adopt the session the bridge created.
+        """
+        session_id = getattr(self, "_agent_v2_session_id", None)
+        if not session_id or not self._current_project_path:
+            return result_json
+        try:
+            result = json.loads(result_json)
+            store = self._agent.get_session_store(
+                os.path.abspath(self._current_project_path))
+            store.append_message(
+                session_id, "assistant",
+                str(result.get("final_text") or ""),
+                {"run_id": result.get("run_id"),
+                 "status": result.get("status"),
+                 "checkpoint_id": result.get("checkpoint_id"),
+                 "mutated_files": result.get("mutated_files") or []})
+            status = str(result.get("status") or "")
+            store.set_status(session_id, {
+                "cancelled": "cancelled", "error": "error",
+            }.get(status, "complete"))
+            result["session_id"] = session_id
+            return json.dumps(result, ensure_ascii=False, default=str)
+        except Exception:
+            return result_json
 
     @Slot(result=str)
     def agent_cancel_v2(self) -> str:

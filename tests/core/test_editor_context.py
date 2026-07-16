@@ -1,5 +1,6 @@
 from nexcoder.agent.core.editor_context import (
-    MAX_SELECTION_CHARS, render_editor_context,
+    MAX_HISTORY_MESSAGES, MAX_SELECTION_CHARS,
+    render_chat_history, render_editor_context,
 )
 
 
@@ -48,3 +49,30 @@ def test_long_selection_truncates():
     out = render_editor_context({"selection": {"text": "a" * 10_000}})
     assert "(selection truncated)" in out
     assert len(out) < MAX_SELECTION_CHARS + 400
+
+
+def test_chat_history_empty_and_junk():
+    assert render_chat_history(None) == ""
+    assert render_chat_history([]) == ""
+    assert render_chat_history([{"role": "system", "content": "x"},
+                                {"role": "user", "content": "  "}]) == ""
+
+
+def test_chat_history_renders_recent_exchanges():
+    out = render_chat_history([
+        {"role": "user", "content": "add a parser"},
+        {"role": "assistant", "content": "Done: parser.py created."},
+    ])
+    assert out.startswith("--- Prior conversation")
+    assert "User: add a parser" in out
+    assert "Assistant: Done: parser.py created." in out
+    assert out.rstrip().endswith("--- Current request ---")
+
+
+def test_chat_history_caps_message_count_and_length():
+    many = [{"role": "user", "content": f"msg {i} " + "x" * 2000}
+            for i in range(20)]
+    out = render_chat_history(many)
+    assert out.count("User:") == MAX_HISTORY_MESSAGES
+    assert "msg 19" in out and "msg 5" not in out
+    assert "…(truncated)" in out

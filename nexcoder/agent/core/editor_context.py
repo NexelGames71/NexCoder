@@ -13,6 +13,37 @@ from pathlib import Path
 # small enough to never crowd out the conversation budget.
 MAX_SELECTION_CHARS = 4000
 
+# Prior-conversation replay: a few recent exchanges give follow-up
+# prompts ("now add tests for that") their referent without flooding
+# the fresh run's context.
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_CHARS = 700
+
+
+def render_chat_history(messages: list[dict] | None) -> str:
+    """Render recent session messages as a prompt preamble, or "".
+
+    Each item needs ``role`` ("user"/"assistant") and ``content``. The
+    result ends with a "Current request" header so the model can tell
+    replayed context from the live task.
+    """
+    if not messages:
+        return ""
+    lines: list[str] = []
+    for message in messages[-MAX_HISTORY_MESSAGES:]:
+        role = str(message.get("role", "")).strip().lower()
+        text = str(message.get("content", "")).strip()
+        if role not in ("user", "assistant") or not text:
+            continue
+        if len(text) > MAX_HISTORY_CHARS:
+            text = text[:MAX_HISTORY_CHARS] + " …(truncated)"
+        lines.append(f"{'User' if role == 'user' else 'Assistant'}: {text}")
+    if not lines:
+        return ""
+    return ("--- Prior conversation (earlier in this chat session) ---\n"
+            + "\n\n".join(lines)
+            + "\n--- Current request ---\n")
+
 
 def _relative(path: str, project_root: Path | str | None) -> str:
     if not project_root:

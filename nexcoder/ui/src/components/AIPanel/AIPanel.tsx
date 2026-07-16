@@ -33,6 +33,7 @@ export default function AIPanel() {
     setTaskPlan,
     setSkills,
     setActiveMode,
+    activeSessionId,
     setActiveSessionId,
   } = useChatStore();
 
@@ -288,14 +289,21 @@ export default function AIPanel() {
             text: selection.text,
           }
         : null,
+      // Chat history: the run appends to this session (or the bridge
+      // creates one and returns its id).
+      session_id: activeSessionId || null,
     };
-    const contextJson = (editorContext.active_file || editorContext.selection)
+    const contextJson = (editorContext.active_file || editorContext.selection
+        || editorContext.session_id)
       ? JSON.stringify(editorContext)
       : '';
 
     useAgentRunStore.getState().start(userMessage.id);
     try {
       const result = await agentRunV2(task, skillId, mode, contextJson);
+      if (result && result.session_id && result.session_id !== activeSessionId) {
+        setActiveSessionId(result.session_id);
+      }
       if (result && result.success === false) {
         // Surface bridge-level refusals (no project open, agent busy)
         // instead of leaving the panel silently empty.
