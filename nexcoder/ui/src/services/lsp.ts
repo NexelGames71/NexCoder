@@ -13,6 +13,7 @@ import {
   onLspResponse,
 } from './bridge';
 import { useDiagnosticsStore } from '../store/useDiagnosticsStore';
+import { useEditorSettingsStore } from '../store/useEditorSettingsStore';
 
 const REQUEST_TIMEOUT_MS = 12000;
 const SUPPORTED_LANGUAGES = new Set([
@@ -29,7 +30,9 @@ const pending = new Map<string, {
 }>();
 
 export function isLspLanguage(language: string | undefined): boolean {
-  return !!language && SUPPORTED_LANGUAGES.has(language);
+  if (!language || !SUPPORTED_LANGUAGES.has(language)) return false;
+  // Master switch lives in editor settings (Languages category).
+  return useEditorSettingsStore.getState().settings.lspEnabled;
 }
 
 export function initLsp(): void {

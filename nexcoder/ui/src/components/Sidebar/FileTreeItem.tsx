@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import { FileNode } from '../../types';
 import { getFileIcon, getFileColor } from '../../utils/fileIcons';
 import { selectActiveFile, useEditorStateStore } from '../../store/useEditorStateStore';
+import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
 import { createDirectory, createFile, deleteFile, readFile, renameFile, spawnTerminal } from '../../services/bridge';
 import { getLanguageFromExtension } from '../../utils/languageMap';
 import { useProjectStore } from '../../store/useProjectStore';
@@ -127,6 +128,11 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
       return;
     }
     if (action === 'delete') {
+      const { confirmFileDelete } = useEditorSettingsStore.getState().settings;
+      if (confirmFileDelete
+          && !window.confirm(`Delete ${node.name}? This cannot be undone.`)) {
+        return;
+      }
       const res = await deleteFile(node.path);
       if (!res?.success) {
         if (res?.details?.reason !== 'user_cancelled') {

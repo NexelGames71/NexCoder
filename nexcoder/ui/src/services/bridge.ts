@@ -179,7 +179,9 @@ export async function getEngineSettings(): Promise<any> {
 
 export async function updateEngineSettings(settings: {
   context_window?: number; adapter?: string; full_auto?: boolean;
-  autonomy?: string;
+  autonomy?: string; max_output_tokens?: number; temperature?: number;
+  max_turns?: number; disabled_tools?: string[]; memory_enabled?: boolean;
+  cmd_build?: string; cmd_test?: string; cmd_lint?: string;
 }): Promise<any> {
   return callBridge('agent_update_engine_settings', JSON.stringify(settings));
 }
@@ -222,6 +224,10 @@ export async function lspStatus(): Promise<any> {
 
 export async function testModelConnection(): Promise<any> {
   return callBridge('test_model_connection');
+}
+
+export async function getActiveRules(): Promise<any> {
+  return callBridge('agent_get_active_rules');
 }
 
 export function onLspResponse(callback: (json: string) => void): void {

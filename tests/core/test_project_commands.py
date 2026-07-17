@@ -53,6 +53,13 @@ def test_render_mentions_verification():
     assert "`pytest -q`" in out
 
 
+def test_user_overrides_come_first(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXCODER_CMD_TEST", "pytest -x tests/unit")
+    (tmp_path / "Cargo.toml").write_text("[package]", encoding="utf-8")
+    commands = detect_project_commands(tmp_path)
+    assert commands[0] == ("test", "pytest -x tests/unit")
+
+
 def test_broken_package_json_is_ignored(tmp_path):
     (tmp_path / "package.json").write_text("{not json", encoding="utf-8")
     assert detect_project_commands(tmp_path) == []

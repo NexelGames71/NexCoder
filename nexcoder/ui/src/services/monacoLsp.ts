@@ -10,6 +10,7 @@ import type { Monaco } from '@monaco-editor/react';
 import { readFile } from './bridge';
 import { lspRequest } from './lsp';
 import { useEditorStateStore } from '../store/useEditorStateStore';
+import { useEditorSettingsStore } from '../store/useEditorSettingsStore';
 import { getLanguageFromExtension } from '../utils/languageMap';
 
 const modelPaths = new WeakMap<object, string>();
@@ -66,6 +67,10 @@ export function registerLspProviders(monaco: Monaco): void {
     monaco.languages.registerCompletionItemProvider(language, {
       triggerCharacters: ['.', '"', "'", '/', '<'],
       provideCompletionItems: async (model: any, position: any) => {
+        const prefs = useEditorSettingsStore.getState().settings;
+        if (!prefs.lspEnabled || !prefs.lspAutocomplete) {
+          return { suggestions: [] };
+        }
         const path = pathOf(model);
         if (!path) return { suggestions: [] };
         try {

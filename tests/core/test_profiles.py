@@ -42,6 +42,17 @@ def test_write_modes_have_full_belt():
                 "todo_write"} <= names, mode
 
 
+def test_disabled_tools_are_removed_but_reads_survive(monkeypatch):
+    monkeypatch.setenv("NEXCODER_DISABLED_TOOLS",
+                       "run_command,write_file,read_file")
+    belt = build_belt_for(get_v2_profile("agent"))
+    names = set(belt.names)
+    assert "run_command" not in names
+    assert "write_file" not in names
+    # Core read tools can never be disabled.
+    assert "read_file" in names
+
+
 def test_read_only_belt_rejects_write(tmp_path):
     from nexcoder.agent.core.tools.base import ToolContext
     belt = build_belt_for(get_v2_profile("ask"))

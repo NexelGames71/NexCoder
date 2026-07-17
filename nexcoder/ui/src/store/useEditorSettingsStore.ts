@@ -25,6 +25,24 @@ export interface EditorSettings {
   autoSave: boolean;
   bracketPairColorization: boolean;
   stickyScroll: boolean;
+  // Appearance
+  fontFamily: string;            // '' = theme default
+  uiScale: number;               // percent, 100 = default
+  sidebarPosition: 'left' | 'right';
+  aiPanelPosition: 'right' | 'left';
+  // Editor extras
+  codeFolding: boolean;
+  bracketMatching: boolean;
+  // Files
+  restoreOpenFiles: boolean;
+  confirmFileDelete: boolean;
+  // Terminal
+  terminalFontSize: number;
+  terminalScrollback: number;
+  // Language intelligence
+  lspEnabled: boolean;
+  lspDiagnostics: boolean;
+  lspAutocomplete: boolean;
 }
 
 interface EditorSettingsState {
@@ -47,6 +65,19 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   autoSave: false,
   bracketPairColorization: true,
   stickyScroll: false,
+  fontFamily: '',
+  uiScale: 100,
+  sidebarPosition: 'left',
+  aiPanelPosition: 'right',
+  codeFolding: true,
+  bracketMatching: true,
+  restoreOpenFiles: true,
+  confirmFileDelete: true,
+  terminalFontSize: 13,
+  terminalScrollback: 5000,
+  lspEnabled: true,
+  lspDiagnostics: true,
+  lspAutocomplete: true,
 };
 
 export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({

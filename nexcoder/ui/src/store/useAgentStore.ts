@@ -21,6 +21,16 @@ export interface AgentSettings {
   fullAuto: boolean;
   /** Command autonomy: read_only | ask | risky_only | full_auto */
   autonomy: 'read_only' | 'ask' | 'risky_only' | 'full_auto';
+  maxOutputTokens: number;
+  temperature: number;
+  /** 0 = use each mode profile's own turn budget. */
+  maxTurns: number;
+  /** Tool names removed from the agent's belt. */
+  disabledTools: string[];
+  memoryEnabled: boolean;
+  cmdBuild: string;
+  cmdTest: string;
+  cmdLint: string;
   settingsVersion?: number;
 }
 
@@ -56,6 +66,14 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   adapter: 'xml',
   fullAuto: false,
   autonomy: 'ask',
+  maxOutputTokens: 6144,
+  temperature: 0.2,
+  maxTurns: 0,
+  disabledTools: [],
+  memoryEnabled: true,
+  cmdBuild: '',
+  cmdTest: '',
+  cmdLint: '',
   settingsVersion: SETTINGS_VERSION,
 };
 

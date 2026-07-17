@@ -137,8 +137,9 @@ class AgentV2Worker(QThread):
                 emit=lambda event: self.event_json.emit(json.dumps(
                     event.to_dict(), ensure_ascii=False, default=str)),
                 permission_gate=permission_gate,
-                max_turns=profile.max_turns,
+                max_turns=(config.max_turns_override or profile.max_turns),
                 context_window=config.context_window,
+                reserve_output=config.reserve_output,
                 extra_system="\n\n".join(extra_sections),
                 session_store=SessionStore(self._project_root),
                 cancel_token=self.cancel_token,

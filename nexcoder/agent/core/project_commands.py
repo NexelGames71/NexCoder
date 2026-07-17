@@ -19,9 +19,20 @@ MAX_MAKE_TARGETS = 8
 
 
 def detect_project_commands(project_root: str | Path) -> list[tuple[str, str]]:
-    """Return ``(label, command)`` pairs detected from project config."""
+    """Return ``(label, command)`` pairs detected from project config.
+
+    User overrides (settings → env) always come first: when the user
+    told us the build/test/lint command, that beats detection.
+    """
+    import os
     root = Path(project_root)
     commands: list[tuple[str, str]] = []
+    for label, env in (("build", "NEXCODER_CMD_BUILD"),
+                       ("test", "NEXCODER_CMD_TEST"),
+                       ("lint", "NEXCODER_CMD_LINT")):
+        override = os.getenv(env, "").strip()
+        if override:
+            commands.append((label, override))
 
     package_json = root / "package.json"
     if package_json.is_file():

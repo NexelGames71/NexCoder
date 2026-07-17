@@ -9,11 +9,13 @@ import EditorSettingsPage from './components/Settings/EditorSettingsPage';
 import AgentSettingsPage from './components/Settings/AgentSettingsPage';
 import { useProjectStore } from './store/useProjectStore';
 import { useAgentStore } from './store/useAgentStore';
+import { useEditorSettingsStore } from './store/useEditorSettingsStore';
 import { useEditorStateStore, selectActiveFile, selectOpenFiles } from './store/useEditorStateStore';
 import { useResizable } from './hooks/useResizable';
-import { 
-  onProjectOpened, 
+import {
+  onProjectOpened,
   onFileTreeUpdated,
+  readFile,
   writeFile,
   saveFileAs,
   getRecentProjects,
@@ -36,14 +38,71 @@ export default function App() {
       .catch((e) => console.error('Failed to sync AI settings to backend:', e));
   }, [agentSettings.aiEndpoint, agentSettings.aiModel]);
 
-  // Same for engine settings (context window, adapter, autonomy)
+  // Same for engine settings (context window, adapter, autonomy, model
+  // knobs, tool toggles, validation overrides)
   useEffect(() => {
     updateEngineSettings({
       context_window: agentSettings.contextWindow,
       adapter: agentSettings.adapter,
       autonomy: agentSettings.autonomy,
+      max_output_tokens: agentSettings.maxOutputTokens,
+      temperature: agentSettings.temperature,
+      max_turns: agentSettings.maxTurns,
+      disabled_tools: agentSettings.disabledTools,
+      memory_enabled: agentSettings.memoryEnabled,
+      cmd_build: agentSettings.cmdBuild,
+      cmd_test: agentSettings.cmdTest,
+      cmd_lint: agentSettings.cmdLint,
     }).catch((e) => console.error('Failed to sync engine settings:', e));
-  }, [agentSettings.contextWindow, agentSettings.adapter, agentSettings.autonomy]);
+  }, [agentSettings.contextWindow, agentSettings.adapter, agentSettings.autonomy,
+      agentSettings.maxOutputTokens, agentSettings.temperature, agentSettings.maxTurns,
+      agentSettings.disabledTools, agentSettings.memoryEnabled,
+      agentSettings.cmdBuild, agentSettings.cmdTest, agentSettings.cmdLint]);
+
+  // Appearance: UI scale applies to the whole window.
+  const editorSettings = useEditorSettingsStore((s) => s.settings);
+  useEffect(() => {
+    (document.body.style as any).zoom = `${editorSettings.uiScale}%`;
+  }, [editorSettings.uiScale]);
+
+  // Restore previously open files when a project opens (once per project).
+  const editorGroupsState = useEditorStateStore((s) => s.editorGroups);
+  const restoredProjectRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!projectPath || restoredProjectRef.current === projectPath) return;
+    restoredProjectRef.current = projectPath;
+    if (!editorSettings.restoreOpenFiles) return;
+    const raw = localStorage.getItem(`nexcoder_open_tabs:${projectPath}`);
+    if (!raw) return;
+    (async () => {
+      try {
+        const { paths, active } = JSON.parse(raw);
+        const state = useEditorStateStore.getState();
+        for (const path of (paths || []).slice(0, 20)) {
+          const res: any = await readFile(path);
+          if (res?.success) {
+            const name = String(path).split(/[\\/]/).pop() || path;
+            const ext = name.includes('.') ? name.split('.').pop() || '' : '';
+            state.openFile({
+              path, name, content: res.content,
+              language: getLanguageFromExtension(ext), isDirty: false,
+            });
+          }
+        }
+        if (active) state.setActiveFile(active);
+      } catch { /* stale entries are fine to skip */ }
+    })();
+  }, [projectPath, editorSettings.restoreOpenFiles]);
+
+  // Persist the open-tab set per project.
+  useEffect(() => {
+    if (!projectPath || restoredProjectRef.current !== projectPath) return;
+    const paths = editorGroupsState.flatMap((g) => g.openFiles.map((f) => f.path));
+    const activeGroup = editorGroupsState.find((g) => g.openFiles.length > 0);
+    localStorage.setItem(`nexcoder_open_tabs:${projectPath}`, JSON.stringify({
+      paths, active: activeGroup?.activeFilePath || null,
+    }));
+  }, [editorGroupsState, projectPath]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
@@ -221,28 +280,32 @@ export default function App() {
         onLogout={() => setUser(null)}
       />
 
-      {/* Main Workspace */}
+      {/* Main Workspace — panel sides are settings-driven via flex order */}
       <div className="main-content">
         {/* Sidebar */}
-        <div 
+        <div
           className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}
-          style={!sidebarCollapsed ? { width: sidebarWidth } : undefined}
+          style={{
+            ...(sidebarCollapsed ? {} : { width: sidebarWidth }),
+            order: editorSettings.sidebarPosition === 'right' ? 9 : 0,
+          }}
         >
           <Sidebar isCollapsed={sidebarCollapsed} />
         </div>
 
         {/* Sidebar resize handle */}
         {!sidebarCollapsed && (
-          <div 
+          <div
             ref={sidebarResize.handleRef}
-            className="resize-handle resize-handle-horizontal" 
+            className="resize-handle resize-handle-horizontal"
             onMouseDown={sidebarResize.handleMouseDown}
             onDoubleClick={handleSidebarHandleDblClick}
+            style={{ order: editorSettings.sidebarPosition === 'right' ? 8 : 1 }}
           />
         )}
 
         {/* Center column: Editor + Bottom Panel */}
-        <div className="center-column">
+        <div className="center-column" style={{ order: 5 }}>
           <div className="editor-wrapper">
             <EditorArea />
           </div>
@@ -266,18 +329,22 @@ export default function App() {
 
         {/* AI Panel resize handle */}
         {!aiCollapsed && (
-          <div 
+          <div
             ref={aiResize.handleRef}
-            className="resize-handle resize-handle-horizontal" 
+            className="resize-handle resize-handle-horizontal"
             onMouseDown={aiResize.handleMouseDown}
             onDoubleClick={handleAiHandleDblClick}
+            style={{ order: editorSettings.aiPanelPosition === 'left' ? 3 : 6 }}
           />
         )}
 
         {/* AI Panel */}
-        <div 
+        <div
           className={`ai-panel ${aiCollapsed ? 'collapsed' : ''}`}
-          style={!aiCollapsed ? { width: aiWidth } : undefined}
+          style={{
+            ...(aiCollapsed ? {} : { width: aiWidth }),
+            order: editorSettings.aiPanelPosition === 'left' ? 2 : 7,
+          }}
         >
           <AIPanel />
         </div>

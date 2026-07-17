@@ -158,12 +158,23 @@ def get_v2_profile(mode: str) -> V2Profile:
 
 
 def build_belt_for(profile: V2Profile) -> ToolBelt:
-    """Return the tool belt for a profile — structural least privilege."""
+    """Return the tool belt for a profile — structural least privilege.
+
+    User-disabled tools (settings → NEXCODER_DISABLED_TOOLS) are removed
+    on top of the profile's own subset; read_file/glob/grep can never be
+    disabled or the agent goes blind.
+    """
+    import os
+    disabled = {name.strip() for name in
+                os.getenv("NEXCODER_DISABLED_TOOLS", "").split(",")
+                if name.strip()}
+    disabled -= {"read_file", "glob", "grep", "list_directory"}
     full = build_default_belt()
-    if profile.tools is None:
-        return full
+    names = full.names if profile.tools is None else profile.tools
     belt = ToolBelt()
-    for name in profile.tools:
+    for name in names:
+        if name in disabled:
+            continue
         spec = full.get(name)
         if spec is not None:
             belt.register(spec)

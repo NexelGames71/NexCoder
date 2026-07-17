@@ -8,6 +8,7 @@ Mode-specific behaviour lives in the system prompt and belt, never here.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import platform
 from typing import Any, Callable, Protocol
@@ -160,7 +161,8 @@ class AgentLoop:
         if self.extra_system:
             system += "\n\n" + self.extra_system
         from nexcoder.agent.core.memory import load_project_memory
-        project_memory = load_project_memory(self.project_root)
+        project_memory = ("" if os.getenv("NEXCODER_MEMORY", "1") == "0"
+                          else load_project_memory(self.project_root))
         if project_memory:
             system += ("\n\n# Project memory (durable facts from earlier "
                        "sessions; trust unless the code contradicts them)\n"
@@ -191,6 +193,11 @@ class AgentLoop:
         # The connector's default output cap predates the bigger reserve;
         # the loop's reserve_output is the single source of truth.
         extras.setdefault("max_tokens", self.reserve_output)
+        try:
+            extras.setdefault("temperature", min(2.0, max(
+                0.0, float(os.getenv("NEXCODER_TEMPERATURE", "0.2")))))
+        except ValueError:
+            pass
 
         def _persist(current_status: str, turn_number: int) -> None:
             if self.session_store is None:

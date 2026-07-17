@@ -12,6 +12,7 @@ import {
 } from '../../services/bridge';
 import { useTerminalStore } from '../../store/useTerminalStore';
 import { useProjectStore } from '../../store/useProjectStore';
+import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
 
 interface TerminalTabProps {
   onSpawnNew: () => void;
@@ -122,15 +123,16 @@ export default function TerminalTab({ onSpawnNew }: TerminalTabProps) {
   const initializeTerminal = useCallback((sessionId: string, container: HTMLDivElement) => {
     if (xtermsRef.current[sessionId]) return;
 
+    const prefs = useEditorSettingsStore.getState().settings;
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
-      fontSize: 14,
+      fontSize: prefs.terminalFontSize || 14,
       fontFamily: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
       fontWeight: '400',
       lineHeight: 1.2,
       letterSpacing: 0,
-      scrollback: 10000,
+      scrollback: Math.max(200, prefs.terminalScrollback || 5000),
       allowTransparency: false,
       theme: {
         background: '#1e1e1e',

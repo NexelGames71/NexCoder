@@ -679,6 +679,29 @@ class Bridge(QObject):
                 from nexcoder.agent.core.command_policy import AUTONOMY_LEVELS
                 if autonomy in AUTONOMY_LEVELS:
                     self._agent_v2_autonomy = autonomy
+            max_output = data.get("max_output_tokens")
+            if max_output:
+                os.environ["NEXCODER_RESERVE_OUTPUT"] = str(
+                    max(1024, int(max_output)))
+            if "temperature" in data:
+                os.environ["NEXCODER_TEMPERATURE"] = str(
+                    min(2.0, max(0.0, float(data.get("temperature") or 0.2))))
+            if "max_turns" in data:
+                os.environ["NEXCODER_MAX_TURNS"] = str(
+                    max(0, int(data.get("max_turns") or 0)))
+            if "disabled_tools" in data:
+                tools = data.get("disabled_tools") or []
+                if isinstance(tools, list):
+                    os.environ["NEXCODER_DISABLED_TOOLS"] = ",".join(
+                        str(t) for t in tools)
+            if "memory_enabled" in data:
+                os.environ["NEXCODER_MEMORY"] = (
+                    "1" if data.get("memory_enabled") else "0")
+            for key, env in (("cmd_build", "NEXCODER_CMD_BUILD"),
+                             ("cmd_test", "NEXCODER_CMD_TEST"),
+                             ("cmd_lint", "NEXCODER_CMD_LINT")):
+                if key in data:
+                    os.environ[env] = str(data.get(key) or "")
             return json.dumps({"success": True})
         except Exception as e:
             return slot_error_response(e)
@@ -828,6 +851,19 @@ class Bridge(QObject):
                     fh.write(updated)
                 changed.append(absolute)
         return {"changed_files": changed}
+
+    @Slot(result=str)
+    def agent_get_active_rules(self) -> str:
+        """The rendered project rules the agent sees (settings viewer)."""
+        try:
+            if not self._current_project_path:
+                return json.dumps({"success": True, "rules": ""})
+            from nexcoder.agent.core.rules import load_project_rules
+            return json.dumps({
+                "success": True,
+                "rules": load_project_rules(self._current_project_path)})
+        except Exception as e:
+            return slot_error_response(e)
 
     @Slot(result=str)
     def test_model_connection(self) -> str:

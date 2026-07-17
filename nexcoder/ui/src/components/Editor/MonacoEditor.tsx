@@ -172,7 +172,9 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
       3: monaco.MarkerSeverity.Info,
       4: monaco.MarkerSeverity.Hint,
     };
-    monaco.editor.setModelMarkers(model, 'nexlsp', diagnostics.map((d) => ({
+    const visible = settings.lspEnabled && settings.lspDiagnostics
+      ? diagnostics : [];
+    monaco.editor.setModelMarkers(model, 'nexlsp', visible.map((d) => ({
       startLineNumber: (d.range?.start?.line ?? 0) + 1,
       startColumn: (d.range?.start?.character ?? 0) + 1,
       endLineNumber: (d.range?.end?.line ?? 0) + 1,
@@ -181,7 +183,8 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
       severity: severityMap[d.severity ?? 3] ?? monaco.MarkerSeverity.Info,
       source: d.source || 'lsp',
     })));
-  }, [diagnostics, monacoApi, file.path]);
+  }, [diagnostics, monacoApi, file.path,
+      settings.lspEnabled, settings.lspDiagnostics]);
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -200,7 +203,9 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
           lineNumbers: settings.lineNumbers,
           bracketPairColorization: { enabled: settings.bracketPairColorization },
           stickyScroll: { enabled: settings.stickyScroll },
-          fontFamily: 'var(--font-code)',
+          folding: settings.codeFolding,
+          matchBrackets: settings.bracketMatching ? 'always' : 'never',
+          fontFamily: settings.fontFamily || 'var(--font-code)',
           automaticLayout: true,
           cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',
