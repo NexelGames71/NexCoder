@@ -53,3 +53,5 @@ models/coder/
 # Agent e2e scratch folders
 agent-e2e-*/
 agent-plan-e2e*/
+
+language-servers/node_modules/

@@ -234,7 +234,18 @@ class MainWindow(QMainWindow):
             self.restoreState(state)
 
     def closeEvent(self, event) -> None:
-        """Save window geometry on close."""
+        """Save window geometry and stop child processes on close."""
         self._settings.setValue("geometry", self.saveGeometry())
         self._settings.setValue("windowState", self.saveState())
+        try:
+            self._bridge._terminal.kill_all()
+        except Exception:
+            pass
+        try:
+            # Language-server node processes do not die with the parent
+            # on Windows; shut them down explicitly.
+            if self._bridge._lsp_manager is not None:
+                self._bridge._lsp_manager.shutdown()
+        except Exception:
+            pass
         super().closeEvent(event)

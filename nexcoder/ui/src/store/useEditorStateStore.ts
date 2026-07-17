@@ -18,11 +18,21 @@ export interface EditorSelection {
   text: string;
 }
 
+/** A jump target consumed by the editor after a file opens (used by
+ *  go-to-definition and the Problems panel). */
+export interface PendingReveal {
+  path: string;
+  line: number;
+  column: number;
+}
+
 interface EditorState {
   editorGroups: EditorGroup[];
   activeGroupId: string;
   activeSelection: EditorSelection | null;
   setActiveSelection: (selection: EditorSelection | null) => void;
+  pendingReveal: PendingReveal | null;
+  setPendingReveal: (reveal: PendingReveal | null) => void;
 
   openFile: (file: OpenFile, groupId?: string) => void;
   setActiveGroup: (id: string) => void;
@@ -61,6 +71,8 @@ export const useEditorStateStore = create<EditorState>((set, get) => ({
   activeGroupId: 'g1',
   activeSelection: null,
   setActiveSelection: (selection) => set({ activeSelection: selection }),
+  pendingReveal: null,
+  setPendingReveal: (reveal) => set({ pendingReveal: reveal }),
 
   openFile: (file, groupId) =>
     set((state) => {

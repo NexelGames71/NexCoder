@@ -1,9 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 import { OpenFile } from '../../types';
 import { useEditorStateStore } from '../../store/useEditorStateStore';
 import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
+import { useDiagnosticsStore } from '../../store/useDiagnosticsStore';
 import { writeFile } from '../../services/bridge';
+import { notifyChange, notifyOpen } from '../../services/lsp';
+import { registerLspProviders, registerModel } from '../../services/monacoLsp';
 
 interface MonacoEditorProps {
   file: OpenFile;
@@ -18,8 +21,28 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
   const fileRef = useRef(file);
   fileRef.current = file;
 
+  const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
+
   const handleEditorDidMount = (editor: any, monaco: Monaco) => {
     editorRef.current = editor;
+    setMonacoApi(monaco);
+
+    // Language intelligence: register the LSP providers (idempotent),
+    // map this model to its workspace file, and open the document.
+    registerLspProviders(monaco);
+    const model = editor.getModel();
+    if (model) registerModel(model, file.path);
+    notifyOpen(file.path, file.language, file.content);
+
+    // Consume a pending jump (go-to-definition / Problems click).
+    const reveal = useEditorStateStore.getState().pendingReveal;
+    if (reveal && reveal.path === file.path) {
+      useEditorStateStore.getState().setPendingReveal(null);
+      editor.setPosition({ lineNumber: reveal.line, column: reveal.column });
+      editor.revealPositionInCenter(
+        { lineNumber: reveal.line, column: reveal.column });
+      editor.focus();
+    }
 
     // Track the selection so AI runs can auto-attach the code the user
     // is looking at ("fix this" without pasting).
@@ -101,8 +124,48 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       updateFileContent(file.path, value);
+      notifyChange(file.path, file.language, value);
     }
   };
+
+  // Jump requests for a file that is already mounted (e.g. Problems
+  // click on the active file) — the mount-time check misses these.
+  const pendingReveal = useEditorStateStore((s) => s.pendingReveal);
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !pendingReveal || pendingReveal.path !== file.path) return;
+    useEditorStateStore.getState().setPendingReveal(null);
+    editor.setPosition({ lineNumber: pendingReveal.line, column: pendingReveal.column });
+    editor.revealPositionInCenter(
+      { lineNumber: pendingReveal.line, column: pendingReveal.column });
+    editor.focus();
+  }, [pendingReveal, file.path]);
+
+  // Diagnostics → Monaco markers (squiggles) for this file.
+  const diagnostics = useDiagnosticsStore(
+    (s) => s.byPath[file.path]) || [];
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoApi;
+    if (!editor || !monaco) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const severityMap: Record<number, number> = {
+      1: monaco.MarkerSeverity.Error,
+      2: monaco.MarkerSeverity.Warning,
+      3: monaco.MarkerSeverity.Info,
+      4: monaco.MarkerSeverity.Hint,
+    };
+    monaco.editor.setModelMarkers(model, 'nexlsp', diagnostics.map((d) => ({
+      startLineNumber: (d.range?.start?.line ?? 0) + 1,
+      startColumn: (d.range?.start?.character ?? 0) + 1,
+      endLineNumber: (d.range?.end?.line ?? 0) + 1,
+      endColumn: (d.range?.end?.character ?? 0) + 1,
+      message: d.message,
+      severity: severityMap[d.severity ?? 3] ?? monaco.MarkerSeverity.Info,
+      source: d.source || 'lsp',
+    })));
+  }, [diagnostics, monacoApi, file.path]);
 
   return (
     <div style={{ width: '100%', height: '100%' }}>

@@ -59,6 +59,13 @@ def slot_error_response(
     })
 
 
+class _LspSignalHub(QObject):
+    """Thread-safe funnel for LSP results produced on worker threads."""
+
+    response = Signal(str)
+    diagnostics = Signal(str)
+
+
 class Bridge(QObject):
     """Master IPC bridge exposed to JavaScript via QWebChannel.
 
@@ -76,6 +83,8 @@ class Bridge(QObject):
     agent_diff = Signal(str)                # JSON diff for approval
     agent_complete = Signal(str)            # JSON completion result
     agent_event = Signal(str)               # JSON AgentEvent (v2 engine)
+    lsp_response = Signal(str)              # JSON {id, kind, result|error}
+    lsp_diagnostics = Signal(str)           # JSON {path, diagnostics}
     git_updated = Signal(str)               # JSON git status
     project_opened = Signal(str)            # JSON project info
     search_results = Signal(str)            # JSON search results
@@ -111,6 +120,17 @@ class Bridge(QObject):
         self._agent_v2_gate = None
         self._session_stores: dict[str, Any] = {}
         self._redactor = None
+
+        # LSP: worker threads publish through this hub; queued
+        # connections hop results onto the main thread, because
+        # QWebChannel silently drops signals emitted off it.
+        self._lsp_hub = _LspSignalHub()
+        self._lsp_hub.response.connect(
+            self._relay_lsp_response, Qt.ConnectionType.QueuedConnection)
+        self._lsp_hub.diagnostics.connect(
+            self._relay_lsp_diagnostics, Qt.ConnectionType.QueuedConnection)
+        self._lsp_manager = None
+        self._lsp_pool = None
 
     def _session_store(self, project_root: str):
         """Per-project chat session store (cached)."""
@@ -698,6 +718,122 @@ class Bridge(QObject):
                            indent=2),
                 encoding="utf-8")
             return json.dumps({"success": True, "commands": sorted(remaining)})
+        except Exception as e:
+            return slot_error_response(e)
+
+    # ── LSP (language intelligence) ──────────────────────────────────
+
+    def _lsp(self):
+        """Lazily construct the manager and point it at the project."""
+        if self._lsp_manager is None:
+            from concurrent.futures import ThreadPoolExecutor
+            from nexcoder.lsp.manager import LspManager
+            self._lsp_manager = LspManager(
+                on_diagnostics=lambda path, diagnostics:
+                    self._lsp_hub.diagnostics.emit(json.dumps(
+                        {"path": path, "diagnostics": diagnostics},
+                        ensure_ascii=False, default=str)))
+            self._lsp_pool = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="lsp")
+        if self._current_project_path:
+            self._lsp_manager.set_project(self._current_project_path)
+        return self._lsp_manager
+
+    @Slot(str)
+    def _relay_lsp_response(self, payload: str) -> None:
+        self.lsp_response.emit(payload)
+
+    @Slot(str)
+    def _relay_lsp_diagnostics(self, payload: str) -> None:
+        self.lsp_diagnostics.emit(payload)
+
+    @Slot(str, str, str, result=str)
+    def lsp_did_open(self, path: str, language: str, text: str) -> str:
+        try:
+            manager = self._lsp()
+            self._lsp_pool.submit(manager.did_open, path, language, text)
+            return json.dumps({"success": True})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, str, result=str)
+    def lsp_did_change(self, path: str, text: str) -> str:
+        try:
+            manager = self._lsp()
+            self._lsp_pool.submit(manager.did_change, path, text)
+            return json.dumps({"success": True})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, result=str)
+    def lsp_did_close(self, path: str) -> str:
+        try:
+            manager = self._lsp()
+            self._lsp_pool.submit(manager.did_close, path)
+            return json.dumps({"success": True})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, str, str, int, int, str, result=str)
+    def lsp_request(self, request_id: str, kind: str, path: str,
+                    line: int, character: int, extra: str = "") -> str:
+        """Async LSP query; the result arrives on the lsp_response signal."""
+        try:
+            manager = self._lsp()
+        except Exception as e:
+            return slot_error_response(e)
+
+        def work() -> None:
+            payload: dict = {"id": request_id, "kind": kind}
+            try:
+                if kind == "completion":
+                    payload["result"] = manager.completion(path, line, character)
+                elif kind == "hover":
+                    payload["result"] = manager.hover(path, line, character)
+                elif kind == "definition":
+                    payload["result"] = manager.definition(path, line, character)
+                elif kind == "references":
+                    payload["result"] = manager.references(path, line, character)
+                elif kind == "rename":
+                    payload["result"] = self._lsp_apply_rename(
+                        manager, path, line, character, extra)
+                else:
+                    payload["error"] = f"Unknown LSP request kind: {kind}"
+            except Exception as exc:  # never leave the UI promise hanging
+                payload["error"] = str(exc)
+            self._lsp_hub.response.emit(
+                json.dumps(payload, ensure_ascii=False, default=str))
+
+        self._lsp_pool.submit(work)
+        return json.dumps({"success": True})
+
+    def _lsp_apply_rename(self, manager, path: str, line: int,
+                          character: int, new_name: str) -> dict:
+        """Apply a rename atomically on disk; UI reloads changed files."""
+        from nexcoder.lsp.manager import apply_text_edits
+        edits_by_path = manager.rename(path, line, character, new_name)
+        if not edits_by_path:
+            return {"changed_files": []}
+        root = os.path.abspath(self._require_project_path())
+        changed: list[str] = []
+        for target, edits in edits_by_path.items():
+            absolute = os.path.abspath(target)
+            if os.path.commonpath([root, absolute]) != root:
+                continue  # never let a server edit outside the project
+            with open(absolute, "r", encoding="utf-8", errors="replace") as fh:
+                original = fh.read()
+            updated = apply_text_edits(original, edits)
+            if updated != original:
+                with open(absolute, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(updated)
+                changed.append(absolute)
+        return {"changed_files": changed}
+
+    @Slot(result=str)
+    def lsp_status(self) -> str:
+        try:
+            return json.dumps({"success": True,
+                               "servers": self._lsp().status()})
         except Exception as e:
             return slot_error_response(e)
 

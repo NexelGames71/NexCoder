@@ -196,6 +196,38 @@ export async function getProjectMemory(): Promise<any> {
   return callBridge('agent_memory_get');
 }
 
+// LSP (language intelligence)
+export async function lspDidOpen(path: string, language: string, text: string): Promise<any> {
+  return callBridge('lsp_did_open', path, language, text);
+}
+
+export async function lspDidChange(path: string, text: string): Promise<any> {
+  return callBridge('lsp_did_change', path, text);
+}
+
+export async function lspDidClose(path: string): Promise<any> {
+  return callBridge('lsp_did_close', path);
+}
+
+export async function lspRequestRaw(
+  requestId: string, kind: string, path: string,
+  line: number, character: number, extra = '',
+): Promise<any> {
+  return callBridge('lsp_request', requestId, kind, path, line, character, extra);
+}
+
+export async function lspStatus(): Promise<any> {
+  return callBridge('lsp_status');
+}
+
+export function onLspResponse(callback: (json: string) => void): void {
+  connectSignal('lsp_response', callback);
+}
+
+export function onLspDiagnostics(callback: (json: string) => void): void {
+  connectSignal('lsp_diagnostics', callback);
+}
+
 export async function saveProjectMemory(content: string): Promise<any> {
   return callBridge('agent_memory_save', content);
 }
