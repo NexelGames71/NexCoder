@@ -46,6 +46,13 @@ class Conversation:
         self.compact_threshold = compact_threshold
         self._messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}]
+        # Estimator calibration: the backend reports the real prompt
+        # size after each call; the scale corrects chars/3 drift so the
+        # meter and compaction track the actual tokenizer.
+        self._scale = 1.0
+        # Hysteresis: when compaction cannot get below the threshold,
+        # don't thrash — wait until the total grows past this floor.
+        self._compact_floor = 0.0
 
     def add(self, message: dict[str, Any]) -> None:
         self._messages.append(dict(message))
@@ -65,10 +72,27 @@ class Conversation:
         return max(256, self.context_window - self.reserve_output)
 
     def total_tokens(self) -> int:
-        return sum(message_tokens(message) for message in self._messages)
+        raw = sum(message_tokens(message) for message in self._messages)
+        return int(raw * self._scale)
+
+    def calibrate(self, actual_prompt_tokens: int,
+                  estimated_at_send: int) -> None:
+        """Correct the estimator against the backend's reported usage.
+
+        ``estimated_at_send`` is what ``total_tokens()`` returned for the
+        payload that produced ``actual_prompt_tokens``. A 50% EMA keeps
+        one odd report from whipsawing the scale.
+        """
+        if actual_prompt_tokens <= 0 or estimated_at_send <= 0:
+            return
+        raw_estimate = estimated_at_send / self._scale
+        observed = actual_prompt_tokens / max(1.0, raw_estimate)
+        blended = 0.5 * self._scale + 0.5 * observed
+        self._scale = min(3.0, max(0.4, blended))
 
     def needs_compaction(self) -> bool:
-        return self.total_tokens() > self.input_budget * self.compact_threshold
+        threshold = self.input_budget * self.compact_threshold
+        return self.total_tokens() > max(threshold, self._compact_floor)
 
     def compact(self, summarizer: Summarizer | None = None) -> dict[str, int]:
         before = self.total_tokens()
@@ -103,7 +127,13 @@ class Conversation:
                 *self._messages[cutoff:],
             ]
 
-        return {"before": before, "after": self.total_tokens()}
+        after = self.total_tokens()
+        threshold = self.input_budget * self.compact_threshold
+        # If compaction cannot get below the threshold (protected window
+        # + system prompt form the floor), don't re-run it every turn;
+        # wait until the conversation grows meaningfully past this point.
+        self._compact_floor = after * 1.08 if after > threshold else 0.0
+        return {"before": before, "after": after}
 
     def force_fit(self) -> None:
         """Last-resort shrink: stub out the oldest non-protected messages

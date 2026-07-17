@@ -16,6 +16,26 @@ from typing import Callable
 MARKERS = ("<tool_call", '{"name"', "```")
 _HOLDBACK = max(len(marker) for marker in MARKERS) - 1
 
+# Markers that identify raw tool-call payloads in *final* text. Code
+# fences are excluded here: a legitimate final answer may contain them.
+_FINAL_TEXT_MARKERS = ("<tool_call", '{"name"')
+
+
+def scrub_tool_markup(text: str) -> str:
+    """Strip any raw tool-call payload from user-facing final text.
+
+    Unparseable (usually truncated) tool calls must never render as a
+    wall of escaped file content in the transcript.
+    """
+    cut = min((index for index in
+               (text.find(marker) for marker in _FINAL_TEXT_MARKERS)
+               if index != -1), default=-1)
+    if cut == -1:
+        return text
+    kept = text[:cut].rstrip()
+    notice = "(a malformed tool call was removed from this message)"
+    return f"{kept}\n\n{notice}" if kept else notice
+
 
 class StreamGate:
     def __init__(self, emit: Callable[[str], None]) -> None:

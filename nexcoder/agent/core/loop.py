@@ -18,7 +18,7 @@ from nexcoder.agent.core.conversation import Conversation
 from nexcoder.agent.errors import AgentCancelledError, ModelHTTPError
 from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.core.session_store import SessionStore
-from nexcoder.agent.core.stream_gate import StreamGate
+from nexcoder.agent.core.stream_gate import StreamGate, scrub_tool_markup
 from nexcoder.agent.core.tools.base import PermissionGate, ToolBelt, ToolContext
 from nexcoder.agent.core.transport import ToolCallAdapter
 from nexcoder.agent.tool_guardrails import ToolGuardrailConfig, ToolGuardrailController
@@ -50,7 +50,10 @@ statuses current as you complete each step.
 2. Inspect before you change: use glob/grep/read_file to find and understand \
 the relevant code. Never invent file contents.
 3. Edit precisely: prefer edit_file with an exact unique old_string. Use \
-write_file only for new files or full rewrites.
+write_file only for new files or full rewrites. Long files (over ~100 \
+lines) must be written in parts: write_file for the first part, then \
+write_file with append=true for each following part — one oversized call \
+gets cut off and executes nothing.
 4. Verify your work: after making changes, run a verification command \
 (tests, build, or a quick check) with run_command. If it fails, read the \
 error, fix the code, and verify again before finishing.
@@ -264,6 +267,22 @@ class AgentLoop:
                     raise
                 gate.flush()
                 conversation.add(message)
+                # The backend's real prompt size (when reported) corrects
+                # the estimator, so the meter and compaction stay honest.
+                usage = message.get("_usage") or {}
+                actual_prompt = int(usage.get("prompt_tokens") or 0)
+                if actual_prompt > 0:
+                    conversation.calibrate(actual_prompt, tokens)
+                    updated = conversation.total_tokens()
+                    self.emit(AgentEvent("context_usage", {
+                        "tokens": updated,
+                        "budget": conversation.input_budget,
+                        "window": conversation.context_window,
+                        "percent": min(100, round(
+                            100 * updated / conversation.input_budget)),
+                        "turn": turn,
+                        "calibrated": True,
+                    }))
                 turn_data = self.adapter.parse_assistant_message(message)
 
                 if turn_data.parse_error:
@@ -281,13 +300,27 @@ class AgentLoop:
                     not turn_data.tool_calls
                     and ("<tool_call" in raw_content.rsplit("</tool_call>", 1)[-1]
                          or raw_content.rstrip().endswith('{"name"')))
-                if looks_truncated and truncation_retries < 3:
-                    truncation_retries += 1
-                    trajectory.record("truncated_output", {"retry": truncation_retries})
-                    conversation.add({"role": "user", "content":
-                                      "Your last message was cut off mid tool call. "
-                                      "Re-emit the complete tool call, keeping it short."})
-                    continue
+                if looks_truncated:
+                    if truncation_retries < 3:
+                        truncation_retries += 1
+                        trajectory.record("truncated_output",
+                                          {"retry": truncation_retries})
+                        conversation.add({"role": "user", "content":
+                            "Your last tool call was cut off by the output "
+                            "length limit — it was NOT executed. Do not retry "
+                            "it whole. Split the work into smaller calls: for "
+                            "a long file, call write_file with the first ~100 "
+                            "lines now, then keep calling write_file with "
+                            "append=true for each next part until done."})
+                        continue
+                    # Never dump the raw truncated payload as the answer.
+                    status = "error"
+                    final_text = (
+                        "The model kept exceeding its output limit mid tool "
+                        "call, so the run was stopped. Try again with a "
+                        "smaller request, or ask for the file to be written "
+                        "in parts.")
+                    break
 
                 if not turn_data.tool_calls:
                     # Only nudge when the model printed code fences instead of
@@ -302,7 +335,7 @@ class AgentLoop:
                         trajectory.record("no_tool_nudge", {"nudge": nudges})
                         conversation.add({"role": "user", "content": NO_TOOL_NUDGE})
                         continue
-                    final_text = turn_data.text
+                    final_text = scrub_tool_markup(turn_data.text)
                     status = "completed"
                     break
                 made_tool_call = True

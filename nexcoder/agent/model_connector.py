@@ -267,7 +267,10 @@ class ModelConnector:
         """Aggregate OpenAI streaming chunks into one assistant message."""
         content_parts: list[str] = []
         calls: dict[int, dict] = {}
+        usage: dict | None = None
         for item in chunks:
+            if isinstance(item.get("usage"), dict):
+                usage = item["usage"]
             delta = (item.get("choices") or [{}])[0].get("delta") or {}
             if delta.get("content"):
                 content_parts.append(str(delta["content"]))
@@ -286,6 +289,11 @@ class ModelConnector:
         message: dict = {"role": "assistant", "content": "".join(content_parts)}
         if calls:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        if usage:
+            # Real token counts from the backend; the conversation uses
+            # them to calibrate its estimator. Underscore keys never
+            # travel back to the API.
+            message["_usage"] = usage
         return message
 
     # Local single-slot servers return 429 while another request runs.

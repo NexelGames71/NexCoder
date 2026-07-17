@@ -458,12 +458,21 @@ async def _llama_stream_response(kwargs: dict, request_id: str, model_name: str,
     cancelled = Event()
     collected: list[str] = []
 
+    usage_box: dict = {}
+
     def generate() -> None:
         try:
             for chunk in model.create_chat_completion(**kwargs):
                 if cancelled.is_set():
                     break
                 output.put(("chunk", chunk))
+            # After generation the llama context holds prompt+completion
+            # tokens — the exact numbers the client needs to calibrate
+            # its context meter. Safe under the single-inference lock.
+            try:
+                usage_box["total_tokens"] = int(getattr(model, "n_tokens", 0))
+            except Exception:
+                pass
         except Exception as exc:  # propagated to the async response below
             output.put(("error", exc))
         finally:
@@ -535,6 +544,15 @@ async def _llama_stream_response(kwargs: dict, request_id: str, model_name: str,
         "model": model_name,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
     }
+    total_tokens = int(usage_box.get("total_tokens") or 0)
+    if total_tokens > 0:
+        # One streamed content chunk ≈ one generated token.
+        completion_tokens = len(collected)
+        final_chunk["usage"] = {
+            "prompt_tokens": max(0, total_tokens - completion_tokens),
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
     yield f"data: {json.dumps(final_chunk)}\n\n"
     yield "data: [DONE]\n\n"
 

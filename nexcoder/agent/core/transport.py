@@ -177,6 +177,23 @@ class XmlAdapter:
 
         stripped = QWEN_TOOL_CALL_PATTERN.sub(consume, stripped)
 
+        # Unclosed opener: models sometimes drop the </tool_call> tag (or
+        # the stream ended right after the JSON). If everything after the
+        # opener parses as a complete tool-call JSON, accept it; genuinely
+        # truncated JSON still fails and takes the retry path.
+        open_index = stripped.find("<tool_call>")
+        if open_index != -1:
+            body = stripped[open_index + len("<tool_call>"):].strip()
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                payload = None
+            shape = _tool_call_shape(payload) if payload is not None else None
+            if shape is not None:
+                calls.append(ToolCall(id=_new_call_id(),
+                                      name=shape[0], args=shape[1]))
+                stripped = stripped[:open_index]
+
         def consume_fenced(match: re.Match) -> str:
             parsed = _fenced_tool_call(match.group(1))
             if parsed is None:

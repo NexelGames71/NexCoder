@@ -127,9 +127,18 @@ def write_file(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     if ctx.safety.is_sensitive_file(relative):
         return {"success": False, "error_code": "tool_sensitive_file",
                 "error": "Sensitive file write blocked"}
+    append = bool(args.get("append"))
     existed = path.is_file()
     ctx.snapshot_before_mutation(relative)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if append and existed:
+        previous = path.read_text(encoding="utf-8", errors="replace")
+        _write_text(path, previous + content)
+        ctx.emit(AgentEvent("edit_applied", {
+            "path": relative, "created": False,
+            "diff": f"[appended {len(content)} chars]"}))
+        return {"success": True,
+                "message": f"Appended {len(content)} chars to {relative}"}
     _write_text(path, content)
     ctx.emit(AgentEvent("edit_applied", {
         "path": relative, "created": not existed,
@@ -230,10 +239,14 @@ def register_file_tools(belt: ToolBelt) -> None:
         handler=edit_file, mutating=True))
     belt.register(ToolSpec(
         name="write_file",
-        description="Create a new file or fully overwrite an existing one.",
+        description=("Create a new file or fully overwrite an existing one. "
+                     "For long files, write in parts: first call without "
+                     "append, then continue with append=true — keep each "
+                     "call under ~150 lines so it is never cut off."),
         parameters={"type": "object", "properties": {
             "path": {"type": "string"},
-            "content": {"type": "string"}}, "required": ["path", "content"]},
+            "content": {"type": "string"},
+            "append": {"type": "boolean"}}, "required": ["path", "content"]},
         handler=write_file, mutating=True))
     belt.register(ToolSpec(
         name="create_directory", description="Create a directory (parents included).",
