@@ -57,6 +57,39 @@ class TestFinalTextScrub:
         assert "malformed tool call was removed" in out
 
 
+class TestTruncatedWriteSalvage:
+    def _truncated_call(self, content_fragment: str) -> str:
+        return ('Creating the file now:\n<tool_call>\n{"name": "write_file", '
+                '"arguments": {"path": "style.css", "content": "'
+                + content_fragment)
+
+    def test_salvages_path_and_partial_content(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        fragment = "body { margin: 0 }\\n" * 30
+        call = salvage_truncated_write(self._truncated_call(fragment))
+        assert call is not None
+        assert call.name == "write_file"
+        assert call.args["path"] == "style.css"
+        assert call.args["content"].startswith("body { margin: 0 }\n")
+
+    def test_trailing_incomplete_escape_is_trimmed(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        fragment = ("x" * 300) + "\\"  # cut mid-escape
+        call = salvage_truncated_write(self._truncated_call(fragment))
+        assert call is not None
+        assert call.args["content"] == "x" * 300
+
+    def test_tiny_fragments_are_not_salvaged(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        assert salvage_truncated_write(self._truncated_call("abc")) is None
+
+    def test_non_write_calls_are_not_salvaged(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        raw = ('<tool_call>\n{"name": "run_command", "arguments": '
+               '{"command": "' + "y" * 500)
+        assert salvage_truncated_write(raw) is None
+
+
 class TestWriteFileAppend:
     def test_append_extends_existing_file(self, tmp_path):
         from nexcoder.agent.core.belt_factory import build_default_belt

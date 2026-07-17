@@ -121,10 +121,26 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
     });
   };
 
+  // Auto save: write ~1s after typing stops (when enabled).
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+  }, []);
+
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined) {
       updateFileContent(file.path, value);
       notifyChange(file.path, file.language, value);
+      if (settings.autoSave) {
+        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+        const path = fileRef.current.path;
+        autoSaveTimer.current = setTimeout(async () => {
+          try {
+            const res: any = await writeFile(path, value);
+            if (res?.success) setFileDirty(path, false);
+          } catch { /* keep the dirty marker on failure */ }
+        }, 1000);
+      }
     }
   };
 
@@ -182,6 +198,8 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
           tabSize: settings.tabSize,
           insertSpaces: settings.insertSpaces,
           lineNumbers: settings.lineNumbers,
+          bracketPairColorization: { enabled: settings.bracketPairColorization },
+          stickyScroll: { enabled: settings.stickyScroll },
           fontFamily: 'var(--font-code)',
           automaticLayout: true,
           cursorBlinking: 'smooth',

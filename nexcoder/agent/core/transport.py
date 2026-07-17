@@ -46,6 +46,58 @@ def _new_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:8]}"
 
 
+_WRITE_PATH_RE = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_WRITE_CONTENT_RE = re.compile(r'"content"\s*:\s*"')
+_WRITE_APPEND_RE = re.compile(r'"append"\s*:\s*true')
+
+
+def salvage_truncated_write(raw: str) -> ToolCall | None:
+    """Recover a write_file call cut off by the output token cap.
+
+    Small models retry the same oversized call forever; salvaging the
+    partial content turns every truncation into forward progress — the
+    loop writes what arrived and asks for the rest via append=true.
+    Returns None unless a path and a meaningful amount of content can
+    be recovered.
+    """
+    start = raw.rfind("<tool_call>")
+    body = raw[start:] if start != -1 else raw
+    if '"write_file"' not in body:
+        return None
+    path_match = _WRITE_PATH_RE.search(body)
+    content_match = _WRITE_CONTENT_RE.search(body)
+    if not path_match or not content_match:
+        return None
+    try:
+        path = json.loads(f'"{path_match.group(1)}"')
+    except json.JSONDecodeError:
+        return None
+    fragment = body[content_match.end():]
+    # The JSON string was cut mid-way: it has no closing quote (or the
+    # tail after it failed to parse — handled by normal parsing). Trim
+    # back to the last cleanly-decodable point.
+    for _ in range(8):
+        if not fragment:
+            return None
+        # A trailing odd-length backslash run is an incomplete escape.
+        stripped = fragment.rstrip("\\")
+        if (len(fragment) - len(stripped)) % 2 == 1:
+            fragment = fragment[:-1]
+        try:
+            content = json.loads(f'"{fragment}"')
+            break
+        except json.JSONDecodeError:
+            fragment = fragment[:-1]
+    else:
+        return None
+    if len(content) < 200:
+        return None  # not worth salvaging; a retry is cheaper
+    args: dict[str, Any] = {"path": path, "content": content}
+    if _WRITE_APPEND_RE.search(body[:content_match.start()]):
+        args["append"] = True
+    return ToolCall(id=_new_call_id(), name="write_file", args=args)
+
+
 # Hermes/Qwen-native form: the tool name lives inside the JSON body.
 # Qwen2.5 models are trained on this exact shape, so the XML adapter
 # teaches it in the prompt and accepts it (plus the legacy attribute form).

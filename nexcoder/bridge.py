@@ -830,6 +830,16 @@ class Bridge(QObject):
         return {"changed_files": changed}
 
     @Slot(result=str)
+    def test_model_connection(self) -> str:
+        """Probe the configured AI backend (settings page health check)."""
+        try:
+            from nexcoder.agent.model_connector import ModelConnector
+            return json.dumps({"success": True,
+                               **ModelConnector().test_connection()})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(result=str)
     def lsp_status(self) -> str:
         try:
             return json.dumps({"success": True,

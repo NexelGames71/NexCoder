@@ -122,11 +122,12 @@ export default function AIPanel() {
       } catch { setStreaming(false); }
     };
 
-    // Qt signals are exposed with snake_case names on the bridge object
-    if (bridge.agent_complete) bridge.agent_complete.connect(onComplete);
-    return () => {
-      if (bridge.agent_complete) bridge.agent_complete.disconnect(onComplete);
-    };
+    // Qt signals are exposed with snake_case names on the bridge object;
+    // the dev-mode mock bridge has no signal objects, so feature-check.
+    const signal = bridge.agent_complete;
+    if (typeof signal?.connect !== 'function') return;
+    signal.connect(onComplete);
+    return () => { signal.disconnect(onComplete); };
   }, [setStreaming, setActiveSessionId]);
 
 

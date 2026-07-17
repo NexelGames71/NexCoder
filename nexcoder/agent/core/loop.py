@@ -20,7 +20,9 @@ from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.core.session_store import SessionStore
 from nexcoder.agent.core.stream_gate import StreamGate, scrub_tool_markup
 from nexcoder.agent.core.tools.base import PermissionGate, ToolBelt, ToolContext
-from nexcoder.agent.core.transport import ToolCallAdapter
+from nexcoder.agent.core.transport import (
+    ToolCallAdapter, salvage_truncated_write,
+)
 from nexcoder.agent.tool_guardrails import ToolGuardrailConfig, ToolGuardrailController
 from nexcoder.agent.trajectory import AgentTrajectoryRecorder
 
@@ -91,7 +93,7 @@ class AgentLoop:
         permission_gate: PermissionGate | None = None,
         max_turns: int = 50,
         context_window: int = 8192,
-        reserve_output: int = 3072,
+        reserve_output: int = 6144,
         extra_system: str = "",
         trajectory_mode: str = "agent",
         guardrail_config: ToolGuardrailConfig | None = None,
@@ -186,6 +188,9 @@ class AgentLoop:
         trajectory = AgentTrajectoryRecorder(
             self.project_root, task=task, mode=self.trajectory_mode)
         extras = self.adapter.request_extras(schemas)
+        # The connector's default output cap predates the bigger reserve;
+        # the loop's reserve_output is the single source of truth.
+        extras.setdefault("max_tokens", self.reserve_output)
 
         def _persist(current_status: str, turn_number: int) -> None:
             if self.session_store is None:
@@ -301,6 +306,44 @@ class AgentLoop:
                     and ("<tool_call" in raw_content.rsplit("</tool_call>", 1)[-1]
                          or raw_content.rstrip().endswith('{"name"')))
                 if looks_truncated:
+                    # Deterministic recovery first: write the partial
+                    # content that DID arrive, then ask only for the rest.
+                    # Prompt-level "split it up" advice alone gets ignored
+                    # by small models, which retry the same oversized call.
+                    salvaged = salvage_truncated_write(raw_content)
+                    if salvaged is not None and truncation_retries < 3:
+                        truncation_retries += 1
+                        self.emit(AgentEvent("tool_started", {
+                            "tool": "write_file", "args": {
+                                "path": salvaged.args.get("path"),
+                                "salvaged": True}, "turn": turn}))
+                        result = self.belt.execute(
+                            "write_file", salvaged.args, ctx)
+                        self.emit(AgentEvent("tool_result", {
+                            "tool": "write_file",
+                            "success": bool(result.get("success")),
+                            "summary": ("Salvaged partial write: "
+                                        + str(result.get("message")
+                                              or result.get("error") or "")),
+                            "turn": turn}))
+                        trajectory.record("truncated_salvage", {
+                            "path": salvaged.args.get("path"),
+                            "chars": len(salvaged.args.get("content") or "")})
+                        if result.get("success"):
+                            guardrails.note_mutation()
+                            made_tool_call = True
+                            content = str(salvaged.args.get("content") or "")
+                            tail = content[-80:]
+                            conversation.add({"role": "user", "content":
+                                f"Your write_file call was cut off by the "
+                                f"output limit, but the first {len(content)} "
+                                f"characters WERE saved to "
+                                f"{salvaged.args.get('path')}. Do NOT rewrite "
+                                f"them. Continue the file with write_file "
+                                f"append=true, starting exactly after this "
+                                f"text:\n...{tail}"})
+                            _persist("running", turn)
+                            continue
                     if truncation_retries < 3:
                         truncation_retries += 1
                         trajectory.record("truncated_output",

@@ -62,11 +62,11 @@ export default function ChatHistoryPanel() {
   // New runs create/update sessions on disk — refresh the list when a
   // run completes so the chat shows up without a manual Refresh.
   useEffect(() => {
-    const bridge = getBridge();
-    if (!bridge?.agent_complete) return;
+    const signal = getBridge()?.agent_complete;
+    if (typeof signal?.connect !== 'function') return;
     const onComplete = () => { refresh(); };
-    bridge.agent_complete.connect(onComplete);
-    return () => bridge.agent_complete.disconnect(onComplete);
+    signal.connect(onComplete);
+    return () => signal.disconnect(onComplete);
   }, [projectPath]);
 
   const visibleSessions = useMemo(() => {

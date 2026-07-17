@@ -21,6 +21,10 @@ export interface EditorSettings {
   formatOnSave: boolean;
   lineNumbers: 'on' | 'off' | 'relative';
   defaultSplitDirection: 'horizontal' | 'vertical';
+  /** Write changes to disk automatically ~1s after typing stops. */
+  autoSave: boolean;
+  bracketPairColorization: boolean;
+  stickyScroll: boolean;
 }
 
 interface EditorSettingsState {
@@ -40,6 +44,9 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   formatOnSave: false,
   lineNumbers: 'on',
   defaultSplitDirection: 'horizontal',
+  autoSave: false,
+  bracketPairColorization: true,
+  stickyScroll: false,
 };
 
 export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({

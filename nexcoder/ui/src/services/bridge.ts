@@ -220,6 +220,10 @@ export async function lspStatus(): Promise<any> {
   return callBridge('lsp_status');
 }
 
+export async function testModelConnection(): Promise<any> {
+  return callBridge('test_model_connection');
+}
+
 export function onLspResponse(callback: (json: string) => void): void {
   connectSignal('lsp_response', callback);
 }
