@@ -47,6 +47,10 @@ _NODE_SERVERS = {
 
 
 def _servers_root() -> Path:
+    import sys
+    if getattr(sys, "frozen", False):
+        # Packaged app: language-servers/ sits next to the executable.
+        return Path(sys.executable).resolve().parent / "language-servers"
     return Path(__file__).resolve().parents[2] / "language-servers"
 
 
