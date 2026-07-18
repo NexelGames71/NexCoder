@@ -320,6 +320,11 @@ class ModelConnector:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
+            # Ask the backend to append a final usage chunk with the real
+            # prompt/completion token counts. The conversation uses it to
+            # calibrate its chars/3 estimator so the context meter and
+            # compaction track the actual tokenizer, not a guess.
+            "stream_options": {"include_usage": True},
         }
         payload.update(extras or {})
         headers = {"Content-Type": "application/json"}

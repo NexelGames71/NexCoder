@@ -21,16 +21,41 @@ import { Terminal, FilePenLine, FilePlus2, FileText, Search, FolderOpen, BookOpe
 import { useAgentRunStore, TranscriptItem } from '../../store/useAgentRunStore';
 import { agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
 
+interface DiffRow { type: 'add' | 'del' | 'ctx' | 'hunk'; text: string; oldNo?: number; newNo?: number; }
+
+// Parse a unified diff into rendered rows with gutter line numbers,
+// dropping the ---/+++ file headers (the row already names the file).
+function parseDiffRows(diff: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let oldNo = 0, newNo = 0;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ')) continue;
+    if (line.startsWith('@@')) {
+      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (m) { oldNo = parseInt(m[1], 10); newNo = parseInt(m[2], 10); }
+      rows.push({ type: 'hunk', text: line.replace(/@@.*@@/, '').trim() || '⋯' });
+      continue;
+    }
+    if (line.startsWith('+')) { rows.push({ type: 'add', text: line.slice(1), newNo }); newNo++; }
+    else if (line.startsWith('-')) { rows.push({ type: 'del', text: line.slice(1), oldNo }); oldNo++; }
+    else { rows.push({ type: 'ctx', text: line.slice(1), oldNo, newNo }); oldNo++; newNo++; }
+  }
+  return rows;
+}
+
 function DiffView({ diff }: { diff: string }) {
+  const rows = parseDiffRows(diff);
   return (
-    <pre className="step-expand diff-view">
-      {diff.split('\n').map((line, i) => {
-        const cls = line.startsWith('+') && !line.startsWith('+++') ? 'diff-add'
-          : line.startsWith('-') && !line.startsWith('---') ? 'diff-del'
-          : line.startsWith('@@') ? 'diff-hunk' : 'diff-ctx';
-        return <div key={i} className={cls}>{line || ' '}</div>;
-      })}
-    </pre>
+    <div className="diff-view">
+      {rows.map((row, i) => (
+        <div key={i} className={`diff-row diff-${row.type}`}>
+          <span className="diff-gutter">{row.type === 'add' ? '' : row.oldNo ?? ''}</span>
+          <span className="diff-gutter">{row.type === 'del' ? '' : row.newNo ?? ''}</span>
+          <span className="diff-sign">{row.type === 'add' ? '+' : row.type === 'del' ? '−' : ' '}</span>
+          <span className="diff-code">{row.text || ' '}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 

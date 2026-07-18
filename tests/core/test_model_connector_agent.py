@@ -37,3 +37,22 @@ def test_merge_parallel_tool_calls():
         chunk({"tool_calls": [{"index": 1, "id": "b", "function": {"name": "grep", "arguments": "{}"}}]}),
     ])
     assert [c["id"] for c in message["tool_calls"]] == ["a", "b"]
+
+
+def test_merge_captures_usage_chunk():
+    # Backends that honor stream_options.include_usage append a final
+    # chunk carrying real token counts; the loop uses it to calibrate.
+    message = ModelConnector.merge_stream_chunks([
+        chunk({"role": "assistant"}),
+        chunk({"content": "done"}),
+        {"choices": [], "usage": {"prompt_tokens": 1234, "completion_tokens": 12}},
+    ])
+    assert message["content"] == "done"
+    assert message["_usage"]["prompt_tokens"] == 1234
+
+
+def test_merge_without_usage_has_no_usage_key():
+    message = ModelConnector.merge_stream_chunks([
+        chunk({"content": "hi"}),
+    ])
+    assert "_usage" not in message

@@ -1785,6 +1785,34 @@
 .step-streaming { font-size: 10.5px; color: var(--accent-purple); font-family: var(--font-code); flex-shrink: 0; margin-left: auto; }
 .step-icon.streaming { color: var(--accent-purple); animation: step-pulse 1.1s ease-in-out infinite; }
 @keyframes step-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+/* Claude-Code-style diff: gutter line numbers, soft row tints, no noise */
+.diff-view {
+  margin: 4px 0 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden auto;
+  max-height: 340px;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  line-height: 1.55;
+  background: var(--bg-deep);
+}
+.diff-row { display: flex; white-space: pre; }
+.diff-gutter {
+  flex: 0 0 auto; min-width: 30px; padding: 0 6px; text-align: right;
+  color: var(--text-tertiary); opacity: 0.6; user-select: none;
+  border-right: 1px solid var(--border);
+}
+.diff-sign { flex: 0 0 auto; width: 16px; text-align: center; user-select: none; opacity: 0.8; }
+.diff-code { flex: 1 1 auto; padding-right: 10px; }
+.diff-add { background: color-mix(in srgb, var(--accent-green, #22c55e) 14%, transparent); }
+.diff-add .diff-sign, .diff-add .diff-code { color: var(--accent-green, #22c55e); }
+.diff-del { background: color-mix(in srgb, var(--accent-red, #ef4444) 13%, transparent); }
+.diff-del .diff-sign, .diff-del .diff-code { color: var(--accent-red, #ef4444); }
+.diff-ctx .diff-code { color: var(--text-secondary); }
+.diff-hunk { background: color-mix(in srgb, var(--accent-purple) 10%, transparent); }
+.diff-hunk .diff-code { color: var(--accent-purple); font-style: italic; opacity: 0.85; }
 .agent-run-todo { display: flex; gap: var(--space-2); font-size: 11.5px; color: var(--text-secondary); padding-left: 6px; }
 .agent-run-todo-completed { text-decoration: line-through; opacity: 0.7; }
 .agent-run-todo-in_progress { color: var(--accent-purple); }
