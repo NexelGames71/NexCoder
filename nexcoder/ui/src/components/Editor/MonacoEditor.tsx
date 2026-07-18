@@ -87,7 +87,8 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
       },
     });
 
-    monaco.editor.setTheme('nexcoder-theme');
+    // Set initial theme
+    monaco.editor.setTheme(settings.theme);
 
     // Add keybinding for Save (Ctrl+S)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
@@ -185,6 +186,17 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
     })));
   }, [diagnostics, monacoApi, file.path,
       settings.lspEnabled, settings.lspDiagnostics]);
+
+  // Handle theme changes
+  useEffect(() => {
+    if (monacoApi && editorRef.current) {
+      // Ensure we're using a valid theme
+      const validTheme = ['vs-dark', 'vs', 'hc-black', 'nexcoder-theme', 'dark-plus', 'github-dark'].includes(settings.theme) 
+        ? settings.theme 
+        : 'vs-dark';
+      monacoApi.editor.setTheme(validTheme);
+    }
+  }, [settings.theme, monacoApi]);
 
   return (
     <div style={{ width: '100%', height: '100%' }}>

@@ -161,6 +161,22 @@ export default function SettingsPage({ onClose, initialTab = 'editor' }: Setting
   const rows: RowDef[] = useMemo(() => [
     // Appearance
     {
+      id: 'theme', category: 'appearance', label: 'Editor Theme',
+      description: 'Choose the color theme for the editor.',
+      control: (
+        <select className="input" value={editor.settings.theme}
+          onChange={(e) => editor.updateSetting('theme', e.target.value as 'nexcoder' | 'vs-dark' | 'light' | 'hc-black' | 'dark-plus' | 'github-dark' | 'vs')}>
+          <option value="nexcoder">NexCoder Dark</option>
+          <option value="vs-dark">VS Dark</option>
+          <option value="light">Light</option>
+          <option value="hc-black">High Contrast Black</option>
+          <option value="dark-plus">Dark Plus</option>
+          <option value="github-dark">GitHub Dark</option>
+          <option value="vs">VS</option>
+        </select>
+      ),
+    },
+    {
       id: 'uiScale', category: 'appearance', label: 'UI Scale',
       description: 'Zoom the whole interface (percent).', keywords: 'zoom size',
       control: <input className="input" type="number" min={80} max={150} step={5}

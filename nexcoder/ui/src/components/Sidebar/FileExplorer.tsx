@@ -1,7 +1,7 @@
 import React from 'react';
-import { FolderOpen, Plus, FolderPlus, RefreshCw, LocateFixed } from 'lucide-react';
+import { FolderOpen, Plus, FolderPlus, RefreshCw, LocateFixed, FileText } from 'lucide-react';
 import { useProjectStore } from '../../store/useProjectStore';
-import { createDirectory, createFile, getFileTree, openFolderDialog, spawnTerminal } from '../../services/bridge';
+import { createDirectory, createFile, getFileTree, openFolderDialog, openFileDialog, spawnTerminal } from '../../services/bridge';
 import FileTreeItem from './FileTreeItem';
 import { selectActiveFile, useEditorStateStore } from '../../store/useEditorStateStore';
 import { FileNode } from '../../types';
@@ -32,6 +32,25 @@ export default function FileExplorer() {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenFile = async () => {
+    try {
+      const filePath = await openFileDialog();
+      if (filePath) {
+        // Open the file in the editor
+        const fileName = filePath.split(/[\\/]/).pop() || 'file';
+        openFile({
+          path: filePath,
+          name: fileName,
+          content: '',
+          language: getLanguageFromExtension(fileName.includes('.') ? `.${fileName.split('.').pop()}` : ''),
+          isDirty: false,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to open file:', e);
     }
   };
 
@@ -157,9 +176,14 @@ export default function FileExplorer() {
       <div className="empty-state" style={{ height: '100%' }}>
         <FolderOpen size={36} />
         <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>No folder open</p>
-        <button className="btn btn-primary" onClick={handleOpenFolder}>
-          Open Folder
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', width: '100%' }}>
+          <button className="btn btn-primary" onClick={handleOpenFolder} style={{ justifyContent: 'flex-start', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+            <FolderOpen size={14} /> Open Folder
+          </button>
+          <button className="btn btn-primary" onClick={handleOpenFile} style={{ justifyContent: 'flex-start', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+            <FileText size={14} /> Open File
+          </button>
+        </div>
       </div>
     );
   }
@@ -174,6 +198,9 @@ export default function FileExplorer() {
           </button>
           <button className="btn btn-ghost btn-icon tooltip" data-tooltip="Reveal active file" onClick={revealActive} disabled={!activeFile}>
             <LocateFixed size={12} />
+          </button>
+          <button className="btn btn-ghost btn-icon tooltip" data-tooltip="Open File" onClick={handleOpenFile}>
+            <FileText size={12} />
           </button>
           <button className="btn btn-ghost btn-icon tooltip" data-tooltip="New File" onClick={() => createAtRoot('file')}>
             <Plus size={12} />

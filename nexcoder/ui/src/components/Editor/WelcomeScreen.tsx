@@ -64,11 +64,11 @@ export default function WelcomeScreen() {
           {/* Quick Start */}
           <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)' }}>
             <h3 style={{ fontSize: 'var(--font-size-md)', fontWeight: '600', marginBottom: 'var(--space-3)' }}>Start</h3>
-            <button className="btn btn-primary w-full" onClick={handleOpenFolder} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-2)' }}>
-              <FolderOpen size={16} /> Open Folder...
+            <button className="btn btn-primary w-full" onClick={handleOpenFolder} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-1)', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+              <FolderOpen size={14} /> Open Folder...
             </button>
-            <button className="btn btn-primary w-full" onClick={handleOpenFile} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-2)' }}>
-              <FileText size={16} /> Open File...
+            <button className="btn btn-primary w-full" onClick={handleOpenFile} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-1)', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+              <FileText size={14} /> Open File...
             </button>
             <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
               Open an existing directory to start editing and using the AI Agent.

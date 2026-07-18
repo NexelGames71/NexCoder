@@ -12,7 +12,7 @@ import { create } from 'zustand';
  * in the TopBar.
  */
 export interface EditorSettings {
-  theme: string;
+  theme: 'nexcoder' | 'vs-dark' | 'light' | 'hc-black' | 'dark-plus' | 'github-dark' | 'vs';
   fontSize: number;
   wordWrap: 'on' | 'off';
   minimap: boolean;
@@ -53,7 +53,7 @@ interface EditorSettingsState {
 const STORAGE_KEY = 'nexcoder_editor_settings';
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  theme: 'vs-dark',
+  theme: 'nexcoder',
   fontSize: 14,
   wordWrap: 'on',
   minimap: false,
