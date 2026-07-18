@@ -16,13 +16,15 @@ import uuid
 
 from nexcoder.agent.cancellation import CancellationToken
 from nexcoder.agent.core.conversation import Conversation
-from nexcoder.agent.errors import AgentCancelledError, ModelHTTPError
+from nexcoder.agent.errors import (
+    AgentCancelledError, ModelHTTPError, ModelStreamError,
+)
 from nexcoder.agent.core.events import AgentEvent, EventCallback
 from nexcoder.agent.core.session_store import SessionStore
 from nexcoder.agent.core.stream_gate import StreamGate, scrub_tool_markup
 from nexcoder.agent.core.tools.base import PermissionGate, ToolBelt, ToolContext
 from nexcoder.agent.core.transport import (
-    ToolCallAdapter, salvage_truncated_write,
+    ToolCallAdapter, dedupe_salvaged_write, salvage_truncated_write,
 )
 from nexcoder.agent.tool_guardrails import ToolGuardrailConfig, ToolGuardrailController
 from nexcoder.agent.trajectory import AgentTrajectoryRecorder
@@ -136,6 +138,17 @@ class AgentLoop:
             logger.warning("Compaction summarizer failed: %s", exc)
             return "(summary unavailable)"
 
+    def _safe_project_file(self, relative: str) -> Path | None:
+        """Resolve a project-relative path, or None if it escapes the root."""
+        if not relative:
+            return None
+        try:
+            candidate = (Path(self.project_root) / relative).resolve()
+            candidate.relative_to(Path(self.project_root).resolve())
+            return candidate
+        except (ValueError, OSError):
+            return None
+
     def run(self, task: str, *, preload_skill: str | None = None) -> dict[str, Any]:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         ctx = ToolContext(
@@ -221,6 +234,8 @@ class AgentLoop:
         made_tool_call = False
         nudges = 0
         truncation_retries = 0
+        salvage_writes = 0
+        stream_retries = 0
         context_retry_done = False
 
         try:
@@ -277,6 +292,21 @@ class AgentLoop:
                                              {"reason": "context_overflow_retry"}))
                         continue
                     raise
+                except ModelStreamError:
+                    # The backend dropped the stream mid-response (server
+                    # restart, crash, network blip). The conversation is
+                    # unchanged, so retrying the turn is safe — give the
+                    # server a moment to come back before giving up.
+                    if stream_retries < 2:
+                        stream_retries += 1
+                        trajectory.record("stream_retry",
+                                          {"attempt": stream_retries})
+                        self.emit(AgentEvent("stream_retry", {
+                            "attempt": stream_retries, "turn": turn}))
+                        import time
+                        time.sleep(3 * stream_retries)
+                        continue
+                    raise
                 gate.flush()
                 conversation.add(message)
                 # The backend's real prompt size (when reported) corrects
@@ -313,19 +343,45 @@ class AgentLoop:
                     and ("<tool_call" in raw_content.rsplit("</tool_call>", 1)[-1]
                          or raw_content.rstrip().endswith('{"name"')))
                 if looks_truncated:
-                    # Deterministic recovery first: write the partial
-                    # content that DID arrive, then ask only for the rest.
-                    # Prompt-level "split it up" advice alone gets ignored
-                    # by small models, which retry the same oversized call.
+                    # The raw multi-thousand-token fragment must never stay
+                    # in history: it crowds out real context, thrashes the
+                    # compactor, and slows every following turn.
+                    conversation.replace_last_content(
+                        "[emitted an oversized tool call that was cut off "
+                        "by the output limit; removed to save context]")
+                    # Deterministic recovery: write the partial content that
+                    # DID arrive, deduped against what a previous salvage
+                    # already wrote — repeated full rewrites become
+                    # incremental appends, so every attempt makes progress.
                     salvaged = salvage_truncated_write(raw_content)
-                    if salvaged is not None and truncation_retries < 3:
-                        truncation_retries += 1
+                    write_args = None
+                    if salvaged is not None and salvage_writes < 8:
+                        write_args = dict(salvaged.args)
+                        target = self._safe_project_file(
+                            str(write_args.get("path") or ""))
+                        existing = ""
+                        if target is not None and target.is_file():
+                            try:
+                                existing = target.read_text(
+                                    encoding="utf-8", errors="replace")
+                            except OSError:
+                                existing = ""
+                        if not write_args.get("append"):
+                            deduped = dedupe_salvaged_write(
+                                existing, str(write_args.get("content") or ""))
+                            if deduped is None:
+                                write_args = None  # nothing new arrived
+                            else:
+                                write_args["content"] = deduped[0]
+                                write_args["append"] = deduped[1]
+                    if write_args is not None:
+                        salvage_writes += 1
                         self.emit(AgentEvent("tool_started", {
                             "tool": "write_file", "args": {
-                                "path": salvaged.args.get("path"),
+                                "path": write_args.get("path"),
                                 "salvaged": True}, "turn": turn}))
                         result = self.belt.execute(
-                            "write_file", salvaged.args, ctx)
+                            "write_file", write_args, ctx)
                         self.emit(AgentEvent("tool_result", {
                             "tool": "write_file",
                             "success": bool(result.get("success")),
@@ -334,19 +390,22 @@ class AgentLoop:
                                               or result.get("error") or "")),
                             "turn": turn}))
                         trajectory.record("truncated_salvage", {
-                            "path": salvaged.args.get("path"),
-                            "chars": len(salvaged.args.get("content") or "")})
+                            "path": write_args.get("path"),
+                            "chars": len(write_args.get("content") or ""),
+                            "append": bool(write_args.get("append"))})
                         if result.get("success"):
                             guardrails.note_mutation()
                             made_tool_call = True
-                            content = str(salvaged.args.get("content") or "")
+                            # Progress was made — don't burn a retry.
+                            truncation_retries = 0
+                            content = str(write_args.get("content") or "")
                             tail = content[-80:]
                             conversation.add({"role": "user", "content":
                                 f"Your write_file call was cut off by the "
-                                f"output limit, but the first {len(content)} "
-                                f"characters WERE saved to "
-                                f"{salvaged.args.get('path')}. Do NOT rewrite "
-                                f"them. Continue the file with write_file "
+                                f"output limit, but the content up to this "
+                                f"point WAS saved to "
+                                f"{write_args.get('path')}. Do NOT rewrite "
+                                f"it. Continue the file with write_file "
                                 f"append=true, starting exactly after this "
                                 f"text:\n...{tail}"})
                             _persist("running", turn)

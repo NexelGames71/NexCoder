@@ -98,6 +98,26 @@ def salvage_truncated_write(raw: str) -> ToolCall | None:
     return ToolCall(id=_new_call_id(), name="write_file", args=args)
 
 
+def dedupe_salvaged_write(existing: str,
+                          content: str) -> tuple[str, bool] | None:
+    """Reconcile a salvaged full-file rewrite with what is already on disk.
+
+    Small models retry the whole file instead of appending, so the second
+    salvage usually re-contains the first. Returning only the new tail
+    (as an append) makes every truncated attempt monotonic progress.
+    Returns ``(content_to_write, append)`` or ``None`` when the attempt
+    adds nothing new.
+    """
+    if not existing:
+        return content, False
+    if content.startswith(existing):
+        remainder = content[len(existing):]
+        return (remainder, True) if remainder else None
+    if existing.startswith(content):
+        return None  # shorter prefix of what we already have — no progress
+    return content, False  # diverged: take the fresh attempt wholesale
+
+
 # Hermes/Qwen-native form: the tool name lives inside the JSON body.
 # Qwen2.5 models are trained on this exact shape, so the XML adapter
 # teaches it in the prompt and accepts it (plus the legacy attribute form).

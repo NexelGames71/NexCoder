@@ -57,6 +57,23 @@ class Conversation:
     def add(self, message: dict[str, Any]) -> None:
         self._messages.append(dict(message))
 
+    def replace_last_content(self, content: str) -> None:
+        """Swap the newest message's content for a short stub.
+
+        Used when the model emits an oversized (truncated) tool call:
+        keeping the multi-thousand-token fragment in history poisons the
+        context — it crowds out real work, forces compaction thrash, and
+        the model tends to re-read its own broken output.
+        """
+        if len(self._messages) <= 1:
+            return
+        last = self._messages[-1]
+        self._messages[-1] = {
+            "role": last.get("role", "assistant"),
+            "content": content,
+            "_compacted": True,
+        }
+
     def messages(self) -> list[dict[str, Any]]:
         return list(self._messages)
 

@@ -90,6 +90,49 @@ class TestTruncatedWriteSalvage:
         assert salvage_truncated_write(raw) is None
 
 
+class TestDedupeSalvagedWrite:
+    def test_first_salvage_writes_everything(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        assert dedupe_salvaged_write("", "abc") == ("abc", False)
+
+    def test_repeat_full_rewrite_becomes_append_of_tail(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        existing = "body { margin: 0 }\n"
+        content = existing + ".nav { color: red }\n"
+        assert dedupe_salvaged_write(existing, content) == (
+            ".nav { color: red }\n", True)
+
+    def test_no_new_content_returns_none(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        assert dedupe_salvaged_write("abcdef", "abcdef") is None
+        assert dedupe_salvaged_write("abcdef", "abc") is None
+
+    def test_diverged_content_overwrites(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        assert dedupe_salvaged_write("old stuff", "totally new") == (
+            "totally new", False)
+
+
+class TestConversationFragmentEviction:
+    def test_replace_last_content_stubs_the_fragment(self):
+        from nexcoder.agent.core.conversation import Conversation
+        convo = Conversation("system prompt", context_window=8192)
+        convo.add({"role": "user", "content": "write the css"})
+        convo.add({"role": "assistant", "content": "<tool_call>" + "x" * 20000})
+        before = convo.total_tokens()
+        convo.replace_last_content("[oversized tool call removed]")
+        after = convo.total_tokens()
+        assert after < before / 10
+        assert convo.messages()[-1]["content"] == "[oversized tool call removed]"
+        assert convo.messages()[-1]["role"] == "assistant"
+
+    def test_replace_last_never_touches_system(self):
+        from nexcoder.agent.core.conversation import Conversation
+        convo = Conversation("system prompt")
+        convo.replace_last_content("stub")
+        assert convo.messages()[0]["content"] == "system prompt"
+
+
 class TestWriteFileAppend:
     def test_append_extends_existing_file(self, tmp_path):
         from nexcoder.agent.core.belt_factory import build_default_belt

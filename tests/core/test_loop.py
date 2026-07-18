@@ -33,6 +33,44 @@ def make_loop(tmp_path, model, **kwargs):
     return loop, events
 
 
+def test_loop_retries_a_dropped_stream(tmp_path, monkeypatch):
+    from nexcoder.agent.errors import ModelStreamError
+
+    class FlakyModel(FakeModel):
+        def __init__(self, messages, fail_first=1):
+            super().__init__(messages)
+            self.failures_left = fail_first
+
+        def complete(self, messages, *, extras, on_delta=None):
+            if self.failures_left > 0:
+                self.failures_left -= 1
+                raise ModelStreamError("connection forcibly closed")
+            return super().complete(messages, extras=extras, on_delta=on_delta)
+
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    model = FlakyModel([
+        {"role": "assistant", "content": "All good."},
+    ])
+    loop, events = make_loop(tmp_path, model)
+    result = loop.run("say hi")
+    assert result["success"] and result["final_text"] == "All good."
+    assert "stream_retry" in [e.type for e in events]
+
+
+def test_loop_gives_up_after_repeated_stream_drops(tmp_path, monkeypatch):
+    from nexcoder.agent.errors import ModelStreamError
+
+    class DeadModel(FakeModel):
+        def complete(self, messages, *, extras, on_delta=None):
+            raise ModelStreamError("connection forcibly closed")
+
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    loop, _events = make_loop(tmp_path, DeadModel([]))
+    result = loop.run("say hi")
+    assert not result["success"]
+    assert result["status"] == "error"
+
+
 def test_loop_executes_tools_then_finishes(tmp_path):
     (tmp_path / "hello.txt").write_text("world", encoding="utf-8")
     model = FakeModel([
