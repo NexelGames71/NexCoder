@@ -67,6 +67,11 @@ export async function openFolderDialog(): Promise<string> {
   return callBridge('open_folder_dialog');
 }
 
+export async function openFileDialog(): Promise<string> {
+  if (!bridge) return '';
+  return callBridge('open_file_dialog');
+}
+
 export async function openProject(path: string): Promise<any> {
   return callBridge('open_project', path);
 }

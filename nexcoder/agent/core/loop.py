@@ -7,10 +7,12 @@ Mode-specific behaviour lives in the system prompt and belt, never here.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
 import platform
+import re
 from typing import Any, Callable, Protocol
 import uuid
 
@@ -34,6 +36,26 @@ logger = logging.getLogger(__name__)
 MAX_GUARDRAIL_BLOCKS = 6
 MAX_NO_TOOL_NUDGES = 2
 
+_STREAM_NAME_RE = re.compile(r'"name"\s*:\s*"([a-z_]+)"')
+_STREAM_PATH_RE = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _peek_streaming_tool(head: str) -> tuple[str, str]:
+    """Best-effort (tool, path) from the head of a streaming tool call.
+
+    Used only for the live 'writing…' progress event, so partial or
+    missing matches just yield empty strings — never raises.
+    """
+    name_match = _STREAM_NAME_RE.search(head)
+    path_match = _STREAM_PATH_RE.search(head)
+    path = ""
+    if path_match:
+        try:
+            path = json.loads(f'"{path_match.group(1)}"')
+        except (ValueError, json.JSONDecodeError):
+            path = path_match.group(1)
+    return (name_match.group(1) if name_match else "", path)
+
 NO_TOOL_NUDGE = (
     "You have not called any tools yet, so nothing has actually happened in "
     "the project. Printing code in markdown fences does NOT create files. "
@@ -54,11 +76,14 @@ files created, nothing changed. Never invent work the user did not ask for.
 statuses current as you complete each step.
 2. Inspect before you change: use glob/grep/read_file to find and understand \
 the relevant code. Never invent file contents.
-3. Edit precisely: prefer edit_file with an exact unique old_string. Use \
-write_file only for new files or full rewrites. Long files (over ~100 \
-lines) must be written in parts: write_file for the first part, then \
-write_file with append=true for each following part — one oversized call \
-gets cut off and executes nothing.
+3. Edit precisely and in small steps. To change an existing file, ALWAYS \
+use edit_file with a unique old_string — never rewrite a whole file to \
+change part of it. Several small edit_file calls are far better than one \
+big write_file: each is fast, safe, and its diff is easy to review. Use \
+write_file only to CREATE a new file or fully replace a tiny one. When you \
+must write a long new file (over ~100 lines), write it in parts: \
+write_file for the first part, then write_file with append=true for each \
+following part — one oversized call gets cut off and executes nothing.
 4. Verify your work: after making changes, run a verification command \
 (tests, build, or a quick check) with run_command. If it fails, read the \
 error, fix the code, and verify again before finishing.
@@ -274,7 +299,19 @@ class AgentLoop:
                         self.cancel_token.raise_if_cancelled()
                     self.emit(AgentEvent("text_delta", {"text": text, "turn": _turn}))
 
-                gate = StreamGate(_emit_delta)
+                # While a tool call streams the gate goes silent — a big
+                # write can take minutes. Report progress so the UI shows
+                # a live "writing…" tick, and keep the cancel check alive
+                # here (the muted text path no longer runs it).
+                def _on_swallowed(chars: int, head: str, _turn: int = turn) -> None:
+                    if self.cancel_token is not None:
+                        self.cancel_token.raise_if_cancelled()
+                    tool, path = _peek_streaming_tool(head)
+                    self.emit(AgentEvent("tool_streaming", {
+                        "tool": tool, "path": path, "chars": chars,
+                        "turn": _turn}))
+
+                gate = StreamGate(_emit_delta, on_swallowed=_on_swallowed)
                 try:
                     message = self.model.complete(
                         conversation.payload_messages(), extras=extras,

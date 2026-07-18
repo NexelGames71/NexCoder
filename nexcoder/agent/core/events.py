@@ -11,6 +11,7 @@ EventType = Literal[
     "turn_started",
     "text_delta",
     "tool_started",
+    "tool_streaming",
     "tool_result",
     "command_output",
     "todo_updated",

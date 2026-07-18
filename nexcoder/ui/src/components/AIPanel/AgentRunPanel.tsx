@@ -96,6 +96,7 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
           return <div key={index} className="agent-run-notice">{item.text}</div>;
         }
         const { icon: Icon, label, detail } = describeStep(item);
+        const streaming = !item.done && item.streamingChars !== undefined;
         const expandable = Boolean((item.output && item.output.length) || item.diff);
         const isOpen = expanded.has(index);
         return (
@@ -107,9 +108,14 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
               {expandable
                 ? (isOpen ? <ChevronDown size={12} className="step-chevron" /> : <ChevronRight size={12} className="step-chevron" />)
                 : <span className="step-chevron-spacer" />}
-              <Icon size={13} className="step-icon" />
-              <span className="step-label">{label}</span>
+              <Icon size={13} className={`step-icon ${streaming ? 'streaming' : ''}`} />
+              <span className="step-label">{streaming ? 'Writing' : label}</span>
               {detail && <code className="step-detail">{detail}</code>}
+              {streaming && (
+                <span className="step-streaming">
+                  {(item.streamingChars! / 1000).toFixed(1)}k chars…
+                </span>
+              )}
               {(typeof item.added === 'number' || typeof item.removed === 'number') && (
                 <span className="step-diffstat">
                   <span className="diffstat-add">+{item.added ?? 0}</span>
@@ -119,7 +125,7 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
               {item.done && !item.success && item.summary && (
                 <span className="step-error">{item.summary}</span>
               )}
-              {!item.done && <span className="step-spinner">…</span>}
+              {!item.done && !streaming && <span className="step-spinner">…</span>}
             </div>
             {isOpen && item.diff && <DiffView diff={item.diff} />}
             {isOpen && !item.diff && item.output && (

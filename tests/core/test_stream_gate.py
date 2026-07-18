@@ -54,3 +54,37 @@ def test_code_fence_suppressed():
     joined = "".join(out)
     assert "Here is the file:" in joined
     assert "```" not in joined
+
+
+def test_swallowed_progress_reports_char_count():
+    out, emit = collect()
+    reports = []
+    gate = StreamGate(emit, on_swallowed=lambda n, head: reports.append((n, head)))
+    # Prose then a big tool call that streams in chunks.
+    gate.push("Creating the file:\n")
+    body = '<tool_call>\n{"name": "write_file", "arguments": {"path": "big.css", "content": "'
+    gate.push(body)
+    for _ in range(20):
+        gate.push("x" * 100)  # 2000 swallowed chars total
+    gate.flush()
+    # Prose still forwarded; markup suppressed.
+    assert "Creating the file:" in "".join(out)
+    assert "<tool_call" not in "".join(out)
+    # Progress fired with rising counts and a head containing the tool info.
+    assert reports, "expected at least one swallowed-progress report"
+    assert reports[-1][0] >= 1500
+    assert "write_file" in reports[0][1]
+
+
+def test_peek_streaming_tool_extracts_name_and_path():
+    from nexcoder.agent.core.loop import _peek_streaming_tool
+    head = '<tool_call>\n{"name": "write_file", "arguments": {"path": "src/App.js", "content": "'
+    tool, path = _peek_streaming_tool(head)
+    assert tool == "write_file"
+    assert path == "src/App.js"
+
+
+def test_peek_streaming_tool_tolerates_partial():
+    from nexcoder.agent.core.loop import _peek_streaming_tool
+    tool, path = _peek_streaming_tool('<tool_call>\n{"na')
+    assert tool == "" and path == ""

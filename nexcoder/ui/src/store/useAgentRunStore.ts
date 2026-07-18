@@ -14,7 +14,8 @@ export type TranscriptItem =
       output?: string[];   // streamed command output lines
       diff?: string;       // unified diff for file edits
       added?: number;      // diff line counts, shown live as +N −M
-      removed?: number };
+      removed?: number;
+      streamingChars?: number }; // live byte count while the call generates
 
 export interface ContextUsage { tokens: number; budget: number; percent: number; }
 
@@ -63,9 +64,43 @@ function applyEvent(run: AgentRun, event: AgentEventMsg): AgentRun {
       }
       return { ...run, transcript };
     }
-    case 'tool_started':
-      return { ...run, transcript: [...run.transcript,
+    case 'tool_streaming': {
+      // Fires while a tool call is still generating (before tool_started).
+      // Maintain a single trailing placeholder so a long write shows a
+      // live, rising byte count instead of silence.
+      const transcript = [...run.transcript];
+      const last = transcript[transcript.length - 1];
+      const path = payload.path ? { path: payload.path } : undefined;
+      if (last && last.kind === 'step' && !last.done
+          && last.streamingChars !== undefined) {
+        transcript[transcript.length - 1] = {
+          ...last,
+          tool: payload.tool || last.tool,
+          args: path ?? last.args,
+          streamingChars: payload.chars ?? last.streamingChars,
+        };
+      } else {
+        transcript.push({
+          kind: 'step', tool: payload.tool || 'write_file', args: path,
+          done: false, streamingChars: payload.chars ?? 0,
+        });
+      }
+      return { ...run, transcript };
+    }
+    case 'tool_started': {
+      // Adopt a trailing streaming placeholder if present, else append.
+      const transcript = [...run.transcript];
+      const last = transcript[transcript.length - 1];
+      if (last && last.kind === 'step' && !last.done
+          && last.streamingChars !== undefined) {
+        transcript[transcript.length - 1] = {
+          kind: 'step', tool: payload.tool, args: payload.args, done: false,
+        };
+        return { ...run, transcript };
+      }
+      return { ...run, transcript: [...transcript,
                { kind: 'step', tool: payload.tool, args: payload.args, done: false }] };
+    }
     case 'tool_result': {
       const transcript = [...run.transcript];
       for (let i = transcript.length - 1; i >= 0; i--) {

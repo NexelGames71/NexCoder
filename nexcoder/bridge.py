@@ -173,6 +173,12 @@ class Bridge(QObject):
             self._open_project(folder)
         return folder or ""
 
+    @Slot(result=str)
+    def open_file_dialog(self) -> str:
+        """Open native file picker."""
+        file_path = self._dialogs.open_file()
+        return file_path or ""
+
     @Slot(str, result=str)
     def open_project(self, path: str) -> str:
         """Open a project at the given path."""

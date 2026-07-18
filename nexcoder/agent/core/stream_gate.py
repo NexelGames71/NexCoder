@@ -38,13 +38,33 @@ def scrub_tool_markup(text: str) -> str:
 
 
 class StreamGate:
-    def __init__(self, emit: Callable[[str], None]) -> None:
+    def __init__(self, emit: Callable[[str], None],
+                 on_swallowed: Callable[[int, str], None] | None = None) -> None:
         self._emit = emit
+        # Called with (total swallowed chars, head of the swallowed text)
+        # every ~REPORT_EVERY chars while a tool call streams — the UI
+        # shows live progress instead of minutes of silence, and the
+        # loop keeps its cancel check alive during the mute.
+        self._on_swallowed = on_swallowed
         self._buffer = ""
         self._stopped = False
+        self._swallowed = 0
+        self._head = ""
+        self._last_reported = 0
+
+    REPORT_EVERY = 400
+    HEAD_CHARS = 600
 
     def push(self, delta: str) -> None:
         if self._stopped:
+            self._swallowed += len(delta)
+            if len(self._head) < self.HEAD_CHARS:
+                self._head += delta[:self.HEAD_CHARS - len(self._head)]
+            if (self._on_swallowed is not None
+                    and self._swallowed - self._last_reported
+                    >= self.REPORT_EVERY):
+                self._last_reported = self._swallowed
+                self._on_swallowed(self._swallowed, self._head)
             return
         self._buffer += delta
         cut = min((index for index in
@@ -55,7 +75,13 @@ class StreamGate:
             if text:
                 self._emit(text)
             self._stopped = True
+            # The tool markup that follows the cut (the name/path we want
+            # for the progress head) usually arrives in this same delta.
+            remainder = self._buffer[cut:]
             self._buffer = ""
+            if remainder:
+                self._head = remainder[:self.HEAD_CHARS]
+                self._swallowed = len(remainder)
             return
         # Hold back enough characters that a marker split across deltas
         # cannot leak its head before we recognise it.
