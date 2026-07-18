@@ -254,6 +254,24 @@ class Bridge(QObject):
             return slot_error_response(e)
 
     @Slot(str, str, result=str)
+    def write_file_base64(self, path: str, b64: str) -> str:
+        """Write a binary file from base64 (drag-drop import of images etc.)."""
+        import base64
+        try:
+            root = self._require_project_path()
+            target = os.path.abspath(path if os.path.isabs(path)
+                                     else os.path.join(root, path))
+            if os.path.commonpath([root, target]) != root:
+                return slot_error_response(
+                    ValueError("Path is outside the active project"))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as handle:
+                handle.write(base64.b64decode(b64))
+            return json.dumps({"success": True, "path": path})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str, str, result=str)
     def write_file(self, path: str, content: str) -> str:
         """Write content to file (atomic write)."""
         try:

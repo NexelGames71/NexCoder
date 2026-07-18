@@ -84,6 +84,10 @@ export async function readFileBase64(path: string): Promise<any> {
   return callBridge('read_file_base64', path);
 }
 
+export async function writeFileBase64(path: string, b64: string): Promise<any> {
+  return callBridge('write_file_base64', path, b64);
+}
+
 export async function writeFile(path: string, content: string): Promise<any> {
   return callBridge('write_file', path, content);
 }

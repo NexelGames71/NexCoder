@@ -1,4 +1,4 @@
-import React, { KeyboardEvent, ChangeEvent } from 'react';
+import React, { KeyboardEvent, ChangeEvent, useState } from 'react';
 import { Send, Plus, Cpu, ShieldCheck, Eye } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { useAgentStore } from '../../store/useAgentStore';
@@ -64,9 +64,37 @@ export default function ChatInput({ input, onChange, onSend, onOpenSkillPicker, 
     }
   };
 
+  // Dropping a file from the explorer (or OS) onto the composer inserts
+  // its path as an @mention so the user can reference it in the task.
+  const [dragOver, setDragOver] = useState(false);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const internal = e.dataTransfer.getData('application/x-nexcoder-path');
+    const paths: string[] = [];
+    if (internal) paths.push(internal);
+    else if (e.dataTransfer.files?.length) {
+      for (const f of Array.from(e.dataTransfer.files)) paths.push(f.name);
+    }
+    if (!paths.length) return;
+    const mention = paths.map((p) => `@${p}`).join(' ');
+    onChange(input ? `${input.replace(/\s*$/, '')} ${mention} ` : `${mention} `);
+    document.getElementById('ai-chat-input')?.focus();
+  };
+
   return (
     <div className="chat-input-area">
-      <div className="chat-input-box">
+      <div
+        className={`chat-input-box ${dragOver ? 'drag-over' : ''}`}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('application/x-nexcoder-path')
+              || e.dataTransfer.types.includes('Files')) {
+            e.preventDefault(); setDragOver(true);
+          }
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+      >
         <textarea
           className="chat-textarea"
           value={input}

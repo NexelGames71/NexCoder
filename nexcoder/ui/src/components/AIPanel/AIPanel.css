@@ -1350,6 +1350,12 @@
   border-color: var(--accent-purple);
 }
 
+.chat-input-box.drag-over {
+  border-color: var(--accent-purple);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent-purple) 8%, var(--bg-surface));
+}
+
 .chat-textarea {
   width: 100%;
   min-height: 48px;
