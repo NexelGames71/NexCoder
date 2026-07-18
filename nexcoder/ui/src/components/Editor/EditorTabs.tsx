@@ -20,8 +20,8 @@ export default function EditorTabs({ groupId, openFiles, activeFile }: EditorTab
         {openFiles.map((file) => {
           const isDir = false;
           const ext = '.' + file.path.split('.').pop();
-          const Icon = getFileIcon(ext, isDir, false);
-          const color = getFileColor(ext);
+          const Icon = getFileIcon(ext, isDir, false, file.name);
+          const color = getFileColor(ext, file.name);
           const isActive = activeFile?.path === file.path;
 
           return (

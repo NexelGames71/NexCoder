@@ -34,8 +34,8 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
   const isDirectory = node.type === 'directory';
   const isForcedOpen = !!forceOpenPaths?.has(node.path);
   const isOpen = manualOpen || isForcedOpen;
-  const Icon = getFileIcon(node.extension, isDirectory, isOpen);
-  const color = isDirectory ? 'var(--accent-purple)' : getFileColor(node.extension);
+  const Icon = getFileIcon(node.extension, isDirectory, isOpen, node.name);
+  const color = isDirectory ? 'var(--accent-purple)' : getFileColor(node.extension, node.name);
   const isActive = activeFile?.path === node.path;
 
   const openNode = async () => {

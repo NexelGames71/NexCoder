@@ -230,6 +230,29 @@ class Bridge(QObject):
         except Exception as e:
             return slot_error_response(e)
 
+    @Slot(str, result=str)
+    def read_file_base64(self, path: str) -> str:
+        """Read a binary file (image) as a base64 data URL for preview."""
+        import base64
+        import mimetypes
+        try:
+            root = self._require_project_path()
+            target = os.path.abspath(path if os.path.isabs(path)
+                                     else os.path.join(root, path))
+            # Stay inside the project boundary.
+            if os.path.commonpath([root, target]) != root:
+                return slot_error_response(
+                    ValueError("Path is outside the active project"))
+            if os.path.getsize(target) > 25 * 1024 * 1024:
+                return slot_error_response(ValueError("Image too large to preview"))
+            mime = mimetypes.guess_type(target)[0] or "application/octet-stream"
+            with open(target, "rb") as handle:
+                encoded = base64.b64encode(handle.read()).decode("ascii")
+            return json.dumps({"success": True, "path": path,
+                               "data_url": f"data:{mime};base64,{encoded}"})
+        except Exception as e:
+            return slot_error_response(e)
+
     @Slot(str, str, result=str)
     def write_file(self, path: str, content: str) -> str:
         """Write content to file (atomic write)."""

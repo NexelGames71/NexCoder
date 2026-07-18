@@ -6,6 +6,8 @@ import EditorTabs from './EditorTabs';
 import MonacoEditor from './MonacoEditor';
 import DiffViewer from './DiffViewer';
 import WelcomeScreen from './WelcomeScreen';
+import ImagePreview from './ImagePreview';
+import { isImageFile } from '../../utils/fileIcons';
 import './EditorArea.css';
 
 export default function EditorArea() {
@@ -32,7 +34,11 @@ export default function EditorArea() {
                 {activeDiff && isActiveGroup ? (
                   <DiffViewer diff={activeDiff} />
                 ) : activeFile ? (
-                  <MonacoEditor key={`${group.id}:${activeFile.path}`} file={activeFile} />
+                  isImageFile(activeFile.path) ? (
+                    <ImagePreview key={`${group.id}:${activeFile.path}`} file={activeFile} />
+                  ) : (
+                    <MonacoEditor key={`${group.id}:${activeFile.path}`} file={activeFile} />
+                  )
                 ) : (
                   <WelcomeScreen />
                 )}
