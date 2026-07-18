@@ -12,7 +12,9 @@ export type TranscriptItem =
   | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean;
       success?: boolean; summary?: string;
       output?: string[];   // streamed command output lines
-      diff?: string };     // unified diff for file edits
+      diff?: string;       // unified diff for file edits
+      added?: number;      // diff line counts, shown live as +N −M
+      removed?: number };
 
 export interface ContextUsage { tokens: number; budget: number; percent: number; }
 
@@ -110,7 +112,11 @@ function applyEvent(run: AgentRun, event: AgentEventMsg): AgentRun {
         const item = transcript[i];
         if (item.kind === 'step' && !item.done
             && (item.tool === 'edit_file' || item.tool === 'write_file')) {
-          transcript[i] = { ...item, diff: String(payload.diff ?? '') };
+          transcript[i] = {
+            ...item, diff: String(payload.diff ?? ''),
+            added: typeof payload.added === 'number' ? payload.added : undefined,
+            removed: typeof payload.removed === 'number' ? payload.removed : undefined,
+          };
           break;
         }
       }

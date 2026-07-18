@@ -62,6 +62,21 @@ def read_file(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
             "message": f"Read {args.get('path')} ({total} lines)"}
 
 
+def _diff_payload(relative: str, old: str, new: str) -> dict[str, Any]:
+    """Unified diff + added/removed counts for edit_applied events."""
+    lines = list(difflib.unified_diff(
+        old.splitlines(), new.splitlines(),
+        fromfile=f"a/{relative}", tofile=f"b/{relative}", lineterm=""))
+    added = sum(1 for line in lines
+                if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in lines
+                  if line.startswith("-") and not line.startswith("---"))
+    text = "\n".join(lines)
+    if len(text) > 20000:
+        text = text[:20000] + "\n... (diff truncated)"
+    return {"diff": text, "added": added, "removed": removed}
+
+
 def edit_file(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     target = str(args.get("path") or "")
     old = args.get("old_string")
@@ -100,12 +115,10 @@ def edit_file(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     updated = content.replace(old, new) if replace_all else content.replace(old, new, 1)
     ctx.snapshot_before_mutation(relative)
     _write_text(path, updated)
-    diff = "\n".join(difflib.unified_diff(
-        content.splitlines(), updated.splitlines(),
-        fromfile=f"a/{relative}", tofile=f"b/{relative}", lineterm=""))
     replacements = count if replace_all else 1
     ctx.emit(AgentEvent("edit_applied", {
-        "path": relative, "diff": diff[:20000], "replacements": replacements}))
+        "path": relative, "replacements": replacements,
+        **_diff_payload(relative, content, updated)}))
     return {"success": True, "replacements": replacements,
             "message": f"Edited {relative} ({replacements} replacement(s))"}
 
@@ -129,20 +142,21 @@ def write_file(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
                 "error": "Sensitive file write blocked"}
     append = bool(args.get("append"))
     existed = path.is_file()
+    previous = _read_text(path) if existed else ""
     ctx.snapshot_before_mutation(relative)
     path.parent.mkdir(parents=True, exist_ok=True)
     if append and existed:
-        previous = path.read_text(encoding="utf-8", errors="replace")
-        _write_text(path, previous + content)
+        updated = previous + content
+        _write_text(path, updated)
         ctx.emit(AgentEvent("edit_applied", {
-            "path": relative, "created": False,
-            "diff": f"[appended {len(content)} chars]"}))
+            "path": relative, "created": False, "append": True,
+            **_diff_payload(relative, previous, updated)}))
         return {"success": True,
                 "message": f"Appended {len(content)} chars to {relative}"}
     _write_text(path, content)
     ctx.emit(AgentEvent("edit_applied", {
         "path": relative, "created": not existed,
-        "diff": f"[full file write: {len(content)} chars]"}))
+        **_diff_payload(relative, previous, content)}))
     action = "Updated" if existed else "Created"
     return {"success": True, "message": f"{action} {relative}"}
 

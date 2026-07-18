@@ -133,6 +133,45 @@ class TestConversationFragmentEviction:
         assert convo.messages()[0]["content"] == "system prompt"
 
 
+class TestEditAppliedDiffPayloads:
+    def _run(self, tmp_path, tool, args, events):
+        from nexcoder.agent.core.belt_factory import build_default_belt
+        from nexcoder.agent.core.tools.base import ToolContext
+        ctx = ToolContext(project_root=tmp_path, emit=events.append,
+                          run_id="t")
+        return build_default_belt().execute(tool, args, ctx)
+
+    def _edit_event(self, events):
+        return next(e.payload for e in events if e.type == "edit_applied")
+
+    def test_write_file_emits_real_diff_with_counts(self, tmp_path):
+        events = []
+        result = self._run(tmp_path, "write_file", {
+            "path": "a.css", "content": "one\ntwo\nthree\n"}, events)
+        assert result["success"]
+        payload = self._edit_event(events)
+        assert payload["added"] == 3 and payload["removed"] == 0
+        assert "+one" in payload["diff"]
+        assert "full file write" not in payload["diff"]
+
+    def test_append_diff_shows_only_additions(self, tmp_path):
+        (tmp_path / "a.css").write_text("one\n", encoding="utf-8")
+        events = []
+        self._run(tmp_path, "write_file", {
+            "path": "a.css", "content": "two\n", "append": True}, events)
+        payload = self._edit_event(events)
+        assert payload["added"] == 1 and payload["removed"] == 0
+        assert "+two" in payload["diff"]
+
+    def test_overwrite_counts_removals(self, tmp_path):
+        (tmp_path / "a.css").write_text("old1\nold2\n", encoding="utf-8")
+        events = []
+        self._run(tmp_path, "write_file", {
+            "path": "a.css", "content": "new\n"}, events)
+        payload = self._edit_event(events)
+        assert payload["added"] == 1 and payload["removed"] == 2
+
+
 class TestWriteFileAppend:
     def test_append_extends_existing_file(self, tmp_path):
         from nexcoder.agent.core.belt_factory import build_default_belt

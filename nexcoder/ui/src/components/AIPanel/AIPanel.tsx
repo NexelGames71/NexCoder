@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Trash2, Code } from 'lucide-react';
+import { Sparkles, Trash2, Code, ListChecks, ChevronDown, ChevronUp } from 'lucide-react';
 import { useChatStore } from '../../store/useChatStore';
 import { selectActiveFile, useEditorStateStore } from '../../store/useEditorStateStore';
 import { useProjectStore } from '../../store/useProjectStore';
@@ -30,6 +30,13 @@ export default function AIPanel() {
 
   const activeFile = useEditorStateStore(selectActiveFile);
   const activeSelection = useEditorStateStore((s) => s.activeSelection);
+  // Live plan for the pinned card. The todos array reference only
+  // changes on todo_updated events, so these subscriptions stay cheap.
+  const activeTodos = useAgentRunStore(
+    (s) => (s.activeRunId ? s.runs[s.activeRunId]?.todos : undefined));
+  const activeRunLive = useAgentRunStore(
+    (s) => (s.activeRunId ? !!s.runs[s.activeRunId]?.runActive : false));
+  const [planCollapsed, setPlanCollapsed] = useState(false);
   const { projectPath } = useProjectStore();
   const { settings } = useAgentStore();
   const [input, setInput] = useState('');
@@ -272,6 +279,33 @@ export default function AIPanel() {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Live plan — pinned above the composer while the run is active,
+          updating in place as the agent completes steps. */}
+      {activeRunLive && (activeTodos?.length ?? 0) > 0 && (
+        <div className="agent-plan-pinned">
+          <div className="agent-plan-header" onClick={() => setPlanCollapsed((c) => !c)}>
+            <ListChecks size={12} />
+            <span>
+              Plan · {(activeTodos ?? []).filter((t) => t.status === 'completed').length}
+              /{(activeTodos ?? []).length} done
+            </span>
+            {planCollapsed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </div>
+          {!planCollapsed && (
+            <div className="agent-plan-body">
+              {(activeTodos ?? []).map((todo) => (
+                <div key={todo.id} className={`agent-run-todo agent-run-todo-${todo.status}`}>
+                  <span className="todo-mark">
+                    {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '›' : '○'}
+                  </span>
+                  <span>{todo.content}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* SkillPicker overlay â€” anchored above the input */}
       <div style={{ position: 'relative' }}>

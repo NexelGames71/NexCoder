@@ -66,9 +66,14 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
     return next;
   });
 
+  // The live plan renders pinned above the composer (AIPanel) while the
+  // run is active; inline it only afterwards so finished transcripts
+  // still show what the plan was.
+  const showInlineTodos = !runActive && todos.length > 0;
+
   return (
     <div className="agent-run">
-      {todos.length > 0 && (
+      {showInlineTodos && (
         <div className="agent-run-todos">
           {todos.map((todo) => (
             <div key={todo.id} className={`agent-run-todo agent-run-todo-${todo.status}`}>
@@ -105,6 +110,12 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
               <Icon size={13} className="step-icon" />
               <span className="step-label">{label}</span>
               {detail && <code className="step-detail">{detail}</code>}
+              {(typeof item.added === 'number' || typeof item.removed === 'number') && (
+                <span className="step-diffstat">
+                  <span className="diffstat-add">+{item.added ?? 0}</span>
+                  <span className="diffstat-del">−{item.removed ?? 0}</span>
+                </span>
+              )}
               {item.done && !item.success && item.summary && (
                 <span className="step-error">{item.summary}</span>
               )}
