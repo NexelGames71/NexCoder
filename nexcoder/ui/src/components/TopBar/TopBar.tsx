@@ -2,7 +2,7 @@ import React from 'react';
 import { Play, GitCommit, Settings, Bot, LogIn, LogOut, Code } from 'lucide-react';
 import { useProjectStore } from '../../store/useProjectStore';
 import BranchBadge from './BranchBadge';
-import ModelSelector from './ModelSelector';
+import QuickSearch from './QuickSearch';
 import './TopBar.css';
 
 interface TopBarProps {
@@ -39,7 +39,7 @@ export default function TopBar({ onToggleSettings, onToggleAgentSettings, onTogg
       </div>
 
       <div className="topbar-center">
-        <ModelSelector />
+        <QuickSearch />
       </div>
 
       <div className="topbar-right">

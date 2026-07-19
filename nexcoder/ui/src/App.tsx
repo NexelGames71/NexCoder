@@ -65,6 +65,12 @@ export default function App() {
     (document.body.style as any).zoom = `${editorSettings.uiScale}%`;
   }, [editorSettings.uiScale]);
 
+  // Theme: stamp data-theme on the root so the whole IDE (not just the
+  // editor) swaps its CSS variables. index.css defines a block per theme.
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', editorSettings.theme);
+  }, [editorSettings.theme]);
+
   // Restore previously open files when a project opens (once per project).
   const editorGroupsState = useEditorStateStore((s) => s.editorGroups);
   const restoredProjectRef = React.useRef<string | null>(null);

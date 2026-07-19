@@ -771,6 +771,74 @@ code, pre, .code {
   --active: #444444;
   --selected: rgba(255, 255, 255, 0.2);
 }
+
+/* Theme: VS Dark / Dark+ (classic VS Code dark) */
+:root[data-theme="vs-dark"],
+:root[data-theme="dark-plus"] {
+  --bg-deep: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-surface: #2d2d30;
+  --bg-elevated: #333337;
+  --bg-input: #3c3c3c;
+
+  --text-primary: #d4d4d4;
+  --text-secondary: #a0a0a0;
+  --text-tertiary: #6e6e6e;
+  --text-inverse: #1e1e1e;
+
+  --border: #3c3c3c;
+  --border-active: #007fd4;
+  --border-subtle: #2b2b2b;
+
+  --hover: #2a2d2e;
+  --active: #37373d;
+  --selected: rgba(0, 127, 212, 0.25);
+}
+
+/* Theme: GitHub Dark */
+:root[data-theme="github-dark"] {
+  --bg-deep: #0d1117;
+  --bg-panel: #161b22;
+  --bg-surface: #1c2128;
+  --bg-elevated: #21262d;
+  --bg-input: #0d1117;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-tertiary: #6e7681;
+  --text-inverse: #0d1117;
+
+  --border: #30363d;
+  --border-active: #58a6ff;
+  --border-subtle: #21262d;
+
+  --hover: #1f242c;
+  --active: #282e36;
+  --selected: rgba(88, 166, 255, 0.2);
+}
+
+/* Theme: VS (light) */
+:root[data-theme="vs"] {
+  --bg-deep: #ffffff;
+  --bg-panel: #f3f3f3;
+  --bg-surface: #ececec;
+  --bg-elevated: #e4e4e4;
+  --bg-input: #ffffff;
+
+  --text-primary: #1e1e1e;
+  --text-secondary: #616161;
+  --text-tertiary: #8e8e8e;
+  --text-inverse: #ffffff;
+
+  --border: #d4d4d4;
+  --border-active: #007acc;
+  --border-subtle: #e7e7e7;
+
+  --hover: #e8e8e8;
+  --active: #dcdcdc;
+  --selected: rgba(0, 122, 204, 0.18);
+}
+
 .font-medium { font-weight: 500; }
 .font-semibold { font-weight: 600; }
 .w-full { width: 100%; }
