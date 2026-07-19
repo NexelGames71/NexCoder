@@ -1819,6 +1819,35 @@
 .diff-ctx .diff-code { color: var(--text-secondary); }
 .diff-hunk { background: color-mix(in srgb, var(--accent-purple) 10%, transparent); }
 .diff-hunk .diff-code { color: var(--accent-purple); font-style: italic; opacity: 0.85; }
+
+/* Command output: same design language as the diff view, terminal-flavored */
+.cmd-view {
+  margin: 4px 0 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden auto;
+  max-height: 300px;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  line-height: 1.55;
+  background: var(--bg-deep);
+}
+.cmd-row { display: flex; white-space: pre-wrap; word-break: break-word; }
+.cmd-gutter {
+  flex: 0 0 auto; min-width: 30px; padding: 0 6px; text-align: right;
+  color: var(--text-tertiary); opacity: 0.6; user-select: none;
+  border-right: 1px solid var(--border);
+}
+.cmd-code { flex: 1 1 auto; padding: 0 10px 0 8px; color: var(--text-secondary); }
+.cmd-prompt { background: color-mix(in srgb, var(--accent-purple) 8%, transparent); }
+.cmd-prompt .cmd-gutter { color: var(--accent-purple); opacity: 0.9; }
+.cmd-prompt .cmd-code { color: var(--text-primary); font-weight: 600; }
+.cmd-err .cmd-code { color: var(--accent-red, #ef4444); }
+.cmd-err { background: color-mix(in srgb, var(--accent-red, #ef4444) 8%, transparent); }
+.cmd-warn .cmd-code { color: var(--accent-yellow, #facc15); }
+.cmd-running .cmd-code { color: var(--accent-purple); font-style: italic; animation: step-pulse 1.1s ease-in-out infinite; }
+/* Live tail: slightly dimmed, no interaction needed to see progress */
+.cmd-view.cmd-live { opacity: 0.92; border-style: dashed; }
 .agent-run-todo { display: flex; gap: var(--space-2); font-size: 11.5px; color: var(--text-secondary); padding-left: 6px; }
 .agent-run-todo-completed { text-decoration: line-through; opacity: 0.7; }
 .agent-run-todo-in_progress { color: var(--accent-purple); }

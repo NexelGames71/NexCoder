@@ -59,6 +59,40 @@ function DiffView({ diff }: { diff: string }) {
   );
 }
 
+const ERROR_LINE = /\b(error|exception|fatal|failed|traceback)\b/i;
+const WARN_LINE = /\b(warn|warning|deprecated)\b/i;
+
+// Terminal-style output panel, same design language as DiffView:
+// gutter line numbers, a ❯ command header, and tinted error/warn lines.
+function CommandOutputView({ command, output, live }: {
+  command: string; output: string[]; live?: boolean;
+}) {
+  return (
+    <div className={`cmd-view ${live ? 'cmd-live' : ''}`}>
+      {command && (
+        <div className="cmd-row cmd-prompt">
+          <span className="cmd-gutter">❯</span>
+          <span className="cmd-code">{command}</span>
+        </div>
+      )}
+      {output.map((line, i) => {
+        const cls = ERROR_LINE.test(line) ? 'cmd-err'
+          : WARN_LINE.test(line) ? 'cmd-warn' : '';
+        return (
+          <div key={i} className={`cmd-row ${cls}`}>
+            <span className="cmd-gutter">{i + 1}</span>
+            <span className="cmd-code">{line || ' '}</span>
+          </div>
+        );
+      })}
+      {live && <div className="cmd-row cmd-running">
+        <span className="cmd-gutter">·</span>
+        <span className="cmd-code">running…</span>
+      </div>}
+    </div>
+  );
+}
+
 // Codex-style row: quiet verb phrase describing the action, not raw tool IO.
 function describeStep(item: Extract<TranscriptItem, { kind: 'step' }>): { icon: any; label: string; detail: string } {
   const args = item.args ?? {};
@@ -154,7 +188,20 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
             </div>
             {isOpen && item.diff && <DiffView diff={item.diff} />}
             {isOpen && !item.diff && item.output && (
-              <pre className="step-expand">{item.output.join('\n')}</pre>
+              <CommandOutputView
+                command={String(item.args?.command ?? '')}
+                output={item.output}
+              />
+            )}
+            {/* Live tail: while a command runs, surface its last lines
+                without requiring a click — no more silent minutes. */}
+            {!isOpen && !item.done && item.tool === 'run_command'
+              && item.output && item.output.length > 0 && (
+              <CommandOutputView
+                command=""
+                output={item.output.slice(-6)}
+                live
+              />
             )}
           </div>
         );
