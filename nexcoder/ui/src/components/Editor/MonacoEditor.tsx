@@ -7,6 +7,7 @@ import { useDiagnosticsStore } from '../../store/useDiagnosticsStore';
 import { writeFile } from '../../services/bridge';
 import { notifyChange, notifyOpen } from '../../services/lsp';
 import { registerLspProviders, registerModel } from '../../services/monacoLsp';
+import { toMonacoTheme } from '../../services/monacoSetup';
 
 interface MonacoEditorProps {
   file: OpenFile;
@@ -23,9 +24,35 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
 
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const handleEditorDidMount = (editor: any, monaco: Monaco) => {
     editorRef.current = editor;
     setMonacoApi(monaco);
+
+    // Robust sizing: Monaco's own container measurement is unreliable
+    // right after creation (observed persistent 5x5 editors inside a
+    // healthy 1280px wrapper, immune to argument-less layout() retries).
+    // Bypass its measuring entirely: feed explicit wrapper dimensions,
+    // now and on every container resize.
+    let disposed = false;
+    const layoutToWrapper = () => {
+      const wrapper = containerRef.current;
+      if (disposed || !wrapper) return;
+      const width = wrapper.clientWidth;
+      const height = wrapper.clientHeight;
+      if (width > 0 && height > 0) editor.layout({ width, height });
+    };
+    requestAnimationFrame(layoutToWrapper);
+    setTimeout(layoutToWrapper, 150);
+    const wrapper = containerRef.current;
+    if (wrapper && typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(layoutToWrapper);
+      observer.observe(wrapper);
+      editor.onDidDispose(() => { disposed = true; observer.disconnect(); });
+    } else {
+      editor.onDidDispose(() => { disposed = true; });
+    }
 
     // Language intelligence: register the LSP providers (idempotent),
     // map this model to its workspace file, and open the document.
@@ -63,32 +90,8 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
       );
     });
 
-    // Define custom theme matching NexCoder palette
-    monaco.editor.defineTheme('nexcoder-theme', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [
-        { token: '', background: '0e0e14' },
-        { token: 'comment', foreground: '5a5a72', fontStyle: 'italic' },
-        { token: 'keyword', foreground: '6c5ce7', fontStyle: 'bold' },
-        { token: 'string', foreground: '00b894' },
-        { token: 'number', foreground: 'fdcb6e' },
-      ],
-      colors: {
-        'editor.background': '#0e0e14',
-        'editor.foreground': '#e0e0e8',
-        'editor.lineHighlightBackground': '#1a1a26',
-        'editorCursor.foreground': '#6c5ce7',
-        'editorWhitespace.foreground': '#2a2a3a',
-        'editorLineNumber.foreground': '#5a5a72',
-        'editorLineNumber.activeForeground': '#e0e0e8',
-        'editorWidget.background': '#16161e',
-        'editorWidget.border': '#2a2a3a',
-      },
-    });
-
-    // Set initial theme
-    monaco.editor.setTheme(settings.theme);
+    // Themes are registered once in monacoSetup; apply the mapped id.
+    monaco.editor.setTheme(toMonacoTheme(settings.theme));
 
     // Add keybinding for Save (Ctrl+S)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
@@ -190,20 +193,17 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
   // Handle theme changes
   useEffect(() => {
     if (monacoApi && editorRef.current) {
-      // Ensure we're using a valid theme
-      const validTheme = ['vs-dark', 'vs', 'hc-black', 'nexcoder-theme', 'dark-plus', 'github-dark'].includes(settings.theme) 
-        ? settings.theme 
-        : 'vs-dark';
-      monacoApi.editor.setTheme(validTheme);
+      monacoApi.editor.setTheme(toMonacoTheme(settings.theme));
     }
   }, [settings.theme, monacoApi]);
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
       <Editor
         height="100%"
         language={file.language}
         value={file.content}
+        theme={toMonacoTheme(settings.theme)}
         onChange={handleEditorChange}
         onMount={handleEditorDidMount}
         options={{

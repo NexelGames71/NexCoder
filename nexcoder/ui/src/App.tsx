@@ -11,6 +11,7 @@ import { useProjectStore } from './store/useProjectStore';
 import { useAgentStore } from './store/useAgentStore';
 import { useEditorSettingsStore } from './store/useEditorSettingsStore';
 import { useEditorStateStore, selectActiveFile, selectOpenFiles } from './store/useEditorStateStore';
+import { toShellTheme } from './services/monacoSetup';
 import { useResizable } from './hooks/useResizable';
 import {
   onProjectOpened,
@@ -66,9 +67,13 @@ export default function App() {
   }, [editorSettings.uiScale]);
 
   // Theme: stamp data-theme on the root so the whole IDE (not just the
-  // editor) swaps its CSS variables. index.css defines a block per theme.
+  // editor) swaps its CSS variables. index.css only defines light and
+  // hc-black variable blocks — every dark editor theme keeps the
+  // default dark shell, so map before stamping.
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', editorSettings.theme);
+    const shell = toShellTheme(editorSettings.theme);
+    if (shell) document.documentElement.setAttribute('data-theme', shell);
+    else document.documentElement.removeAttribute('data-theme');
   }, [editorSettings.theme]);
 
   // Restore previously open files when a project opens (once per project).
