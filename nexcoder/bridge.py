@@ -83,6 +83,7 @@ class Bridge(QObject):
     agent_diff = Signal(str)                # JSON diff for approval
     agent_complete = Signal(str)            # JSON completion result
     agent_event = Signal(str)               # JSON AgentEvent (v2 engine)
+    mesh_event = Signal(str)                # JSON mesh event (Agent Mesh)
     lsp_response = Signal(str)              # JSON {id, kind, result|error}
     lsp_diagnostics = Signal(str)           # JSON {path, diagnostics}
     git_updated = Signal(str)               # JSON git status
@@ -118,6 +119,8 @@ class Bridge(QObject):
         self._current_project_path: str | None = None
         self._agent_v2_worker = None
         self._agent_v2_gate = None
+        self._mesh_worker = None
+        self._mesh_gate = None
         self._session_stores: dict[str, Any] = {}
         self._redactor = None
 
@@ -534,8 +537,9 @@ class Bridge(QObject):
                      mode: str = "agent", context_json: str = "") -> str:
         """v2 engine for every AI mode (agent/ask/edit/debug/review/scan)."""
         try:
-            if self._agent_v2_worker is not None and self._agent_v2_worker.isRunning():
-                return json.dumps({"success": False, "error": "Agent is already running"})
+            busy = self._engine_busy()
+            if busy:
+                return json.dumps({"success": False, "error": busy})
             project_root = self._require_project_path()
             from nexcoder.agent.agent_runtime_v2 import AgentV2Worker, UiPermissionGate
             try:
@@ -676,9 +680,87 @@ class Bridge(QObject):
 
     @Slot(str, str, result=str)
     def agent_permission_response(self, request_id: str, decision: str) -> str:
+        # Whichever engine is waiting gets the answer; UiPermissionGate
+        # resolves by id (or its single pending request), so answering
+        # the idle gate is a no-op.
         if self._agent_v2_gate is not None:
             self._agent_v2_gate.resolve(request_id, decision)
+        if self._mesh_gate is not None:
+            self._mesh_gate.resolve(request_id, decision)
         return json.dumps({"success": True})
+
+    # ── Agent Mesh ───────────────────────────────────────────────────
+
+    def _engine_busy(self) -> str | None:
+        if self._agent_v2_worker is not None and self._agent_v2_worker.isRunning():
+            return "A single-agent run is active — wait for it to finish."
+        if self._mesh_worker is not None and self._mesh_worker.isRunning():
+            return "A mesh run is already active."
+        return None
+
+    @Slot(str, result=str)
+    def mesh_run(self, goal: str) -> str:
+        """Start an Agent Mesh run: orchestrator + bounded specialists."""
+        try:
+            if not (goal or "").strip():
+                return json.dumps({"success": False,
+                                   "error": "Describe a goal for the mesh."})
+            busy = self._engine_busy()
+            if busy:
+                return json.dumps({"success": False, "error": busy})
+            project_root = self._require_project_path()
+            from nexcoder.agent.agent_runtime_v2 import UiPermissionGate
+            from nexcoder.agent.mesh_runtime import MeshWorker
+            self._mesh_gate = UiPermissionGate(on_request=lambda *args: None)
+            self._mesh_worker = MeshWorker(
+                project_root, goal.strip(), self._mesh_gate,
+                autonomy=str(getattr(self, "_agent_v2_autonomy", "ask")))
+            self._mesh_worker.event_json.connect(
+                self._relay_mesh_event, Qt.ConnectionType.QueuedConnection)
+            self._mesh_worker.finished_json.connect(
+                self._on_mesh_finished, Qt.ConnectionType.QueuedConnection)
+            self._mesh_worker.start()
+            return json.dumps({"success": True})
+        except Exception as e:
+            return slot_error_response(e)
+
+    @Slot(str)
+    def _relay_mesh_event(self, event_json: str) -> None:
+        """Re-emit mesh events from the main thread for QWebChannel."""
+        self.mesh_event.emit(event_json)
+
+    @Slot(str)
+    def _on_mesh_finished(self, summary_json: str) -> None:
+        try:
+            if self._current_project_path:
+                tree = self._fs.get_file_tree(self._current_project_path)
+                self.file_tree_updated.emit(json.dumps(tree))
+        except Exception:
+            pass
+
+    @Slot(result=str)
+    def mesh_cancel(self) -> str:
+        worker = self._mesh_worker
+        if worker is None or not worker.isRunning():
+            return json.dumps({"success": False, "error": "No mesh active"})
+        worker.cancel()
+        if self._mesh_gate is not None:
+            from nexcoder.agent.core.tools.base import DENY
+            self._mesh_gate.resolve("cancel-all", DENY)
+        return json.dumps({"success": True})
+
+    @Slot(result=str)
+    def mesh_list(self) -> str:
+        """Past mesh runs for the panel's history list."""
+        try:
+            if not self._current_project_path:
+                return json.dumps({"success": True, "runs": []})
+            from nexcoder.agent.mesh.orchestrator import list_mesh_runs
+            return json.dumps({
+                "success": True,
+                "runs": list_mesh_runs(self._current_project_path)})
+        except Exception as e:
+            return slot_error_response(e)
 
     # ── Engine settings / permissions / memory (settings surface) ────
 

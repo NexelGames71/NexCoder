@@ -259,6 +259,23 @@ export function onAgentEvent(callback: (eventJson: string) => void): void {
   connectSignal('agent_event', callback);
 }
 
+// Agent Mesh (orchestrator + specialist agents)
+export async function meshRun(goal: string): Promise<any> {
+  return callBridge('mesh_run', goal);
+}
+
+export async function meshCancel(): Promise<any> {
+  return callBridge('mesh_cancel');
+}
+
+export async function meshList(): Promise<any> {
+  return callBridge('mesh_list');
+}
+
+export function onMeshEvent(callback: (eventJson: string) => void): void {
+  connectSignal('mesh_event', callback);
+}
+
 export async function agentApproveDiff(diffId: string): Promise<any> {
   return callBridge('agent_approve_diff', diffId);
 }
