@@ -146,46 +146,40 @@ export default function FirstRunSetup({ userName, onComplete }: FirstRunSetupPro
   const label = (list: readonly { id: string; label: string }[], id: string) =>
     list.find((o) => o.id === id)?.label ?? id;
 
+  const firstName = userName
+    ? (userName.includes('@') ? userName.split('@')[0] : userName.trim().split(' ')[0])
+    : '';
+
   return (
     <main className="frs-screen">
-      <div className="frs-window">
-        {/* Branded rail */}
-        <aside className="frs-rail">
+      <section className="frs-window">
+        {/* Compact top bar: brand + horizontal step tracker */}
+        <header className="frs-top">
           <div className="frs-brand">
             <div className="frs-logo">N</div>
             <span>NexCoder</span>
           </div>
-          <div className="frs-rail-hero">
-            <h2>Welcome{userName ? `, ${userName.split(' ')[0]}` : ''}.</h2>
-            <p>A couple of quick choices and your workspace is ready. Everything here can be changed later in Settings.</p>
-          </div>
-          <ol className="frs-steps">
+          <nav className="frs-pills">
             {STEPS.map((s, i) => {
               const Icon = s.icon;
               const state = i < step ? 'done' : i === step ? 'active' : 'todo';
               return (
-                <li key={s.id} className={`frs-step frs-step-${state}`}>
-                  <span className="frs-step-dot">{state === 'done' ? <Check size={13} /> : <Icon size={14} />}</span>
-                  <span className="frs-step-copy">
-                    <span className="frs-step-label">{s.label}</span>
-                    <span className="frs-step-hint">{s.hint}</span>
-                  </span>
-                </li>
+                <span key={s.id} className={`frs-pill frs-pill-${state}`}>
+                  <span className="frs-pill-dot">{state === 'done' ? <Check size={12} /> : <Icon size={12} />}</span>
+                  <span className="frs-pill-label">{s.label}</span>
+                </span>
               );
             })}
-          </ol>
-          <div className="frs-rail-glow" aria-hidden="true" />
-        </aside>
+          </nav>
+        </header>
 
-        {/* Content */}
-        <section className="frs-content">
-          <div className="frs-progress"><span style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
+        <div className="frs-progress"><span style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
 
-          <div className="frs-body">
+        <div className="frs-body">
             {step === 0 && (
               <div className="frs-step-panel">
-                <h1>Tell us about you</h1>
-                <p className="frs-sub">Helps tailor defaults and recommendations. Saved locally in NexCoder app data.</p>
+                <h1>{firstName ? `Welcome, ${firstName}` : 'Welcome'}</h1>
+                <p className="frs-sub">A few quick choices set up your workspace. Everything is changeable later in Settings.</p>
                 <div className="frs-field-grid">
                   <label className="frs-field">
                     <span>How did you hear about NexCoder?</span>
@@ -306,8 +300,7 @@ export default function FirstRunSetup({ userName, onComplete }: FirstRunSetupPro
               </button>
             )}
           </div>
-        </section>
-      </div>
+      </section>
     </main>
   );
 }
