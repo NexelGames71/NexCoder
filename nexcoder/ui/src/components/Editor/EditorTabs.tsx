@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, SplitSquareHorizontal, PanelRightClose } from 'lucide-react';
 import { useEditorStateStore } from '../../store/useEditorStateStore';
 import { getFileIcon, getFileColor } from '../../utils/fileIcons';
@@ -12,6 +12,12 @@ interface EditorTabsProps {
 
 export default function EditorTabs({ groupId, openFiles, activeFile }: EditorTabsProps) {
   const { setActiveFile, closeFile, splitEditor, closeGroup, editorGroups } = useEditorStateStore();
+  const activeTabRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeFile?.path]);
+
   if (openFiles.length === 0) return null;
 
   return (
@@ -20,20 +26,22 @@ export default function EditorTabs({ groupId, openFiles, activeFile }: EditorTab
         {openFiles.map((file) => {
           const isDir = false;
           const ext = '.' + file.path.split('.').pop();
-          const Icon = getFileIcon(ext, isDir, false);
-          const color = getFileColor(ext);
+          const Icon = getFileIcon(ext, isDir, false, file.name);
+          const color = getFileColor(ext, file.name);
           const isActive = activeFile?.path === file.path;
 
           return (
             <div
               key={file.path}
+              ref={isActive ? activeTabRef : undefined}
               className={`editor-tab-btn ${isActive ? 'active' : ''}`}
               onClick={() => setActiveFile(file.path, groupId)}
+              title={file.path}
             >
               <span style={{ color, display: 'flex', alignItems: 'center' }}>
                 <Icon size={14} />
               </span>
-              <span>{file.name}</span>
+              <span className="editor-tab-label">{file.name}</span>
               {file.isDirty && (
                 <span
                   style={{

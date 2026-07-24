@@ -5,6 +5,8 @@ import { DiffHunk } from '../../types';
 import { agentApproveDiff, agentRejectDiff, readFile } from '../../services/bridge';
 import { useChatStore } from '../../store/useChatStore';
 import { useEditorStateStore } from '../../store/useEditorStateStore';
+import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
+import { toMonacoTheme } from '../../services/monacoSetup';
 import { getLanguageFromExtension } from '../../utils/languageMap';
 
 interface DiffViewerProps {
@@ -106,6 +108,7 @@ export default function DiffViewer({ diff }: DiffViewerProps) {
         ) : (
         <DiffEditor
           height="100%"
+          theme={toMonacoTheme(useEditorSettingsStore.getState().settings.theme)}
           original={diff.original_content || ''}
           modified={diff.content || diff.diff_display || ''}
           language={diff.language || 'plaintext'}

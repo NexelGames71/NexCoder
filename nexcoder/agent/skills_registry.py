@@ -65,6 +65,12 @@ class SkillCategory:
 
 SKILL_CATEGORIES: list[SkillCategory] = [
     SkillCategory(
+        id="project",
+        label="Project",
+        description="Skills defined by the open project",
+        order=0,
+    ),
+    SkillCategory(
         id="workflow",
         label="Workflow",
         description="How the agent plans and executes work",
@@ -123,9 +129,7 @@ SKILL_CATEGORY_OVERRIDES: dict[str, str] = {
     "using-agent-skills": "meta",
     # Quality
     "test-driven-development": "quality",
-    "code-review-and-quality": "quality",
     "code-simplification": "quality",
-    "debugging-and-error-recovery": "quality",
     "git-workflow-and-versioning": "quality",
     "observability-and-instrumentation": "quality",
     # Frontend
@@ -148,9 +152,13 @@ SKILL_CATEGORY_OVERRIDES: dict[str, str] = {
 # overrides. Falls back to a neutral icon for skills without one.
 SKILL_ICON_OVERRIDES: dict[str, str] = {
     "test-driven-development": "FlaskConical",
-    "code-review-and-quality": "ClipboardCheck",
     "code-simplification": "Sparkles",
-    "debugging-and-error-recovery": "Bug",
+    "commit": "GitCommit",
+    "init": "FileText",
+    "code-review": "ClipboardCheck",
+    "systematic-debugging": "Bug",
+    "verification-before-completion": "CheckCircle2",
+    "writing-plans": "ListChecks",
     "git-workflow-and-versioning": "GitBranch",
     "frontend-ui-engineering": "Layout",
     "browser-testing-with-devtools": "Monitor",
@@ -176,6 +184,7 @@ SKILL_ICON_OVERRIDES: dict[str, str] = {
 }
 
 CATEGORY_ICONS: dict[str, str] = {
+    "project": "Folder",
     "workflow": "ListChecks",
     "quality": "Sparkles",
     "frontend": "Layout",
@@ -235,19 +244,11 @@ def _skills_dir() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
 
 
-def _category_for(skill_id: str, metadata: dict[str, str]) -> str:
-    """Return the category id for *skill_id* (frontmatter wins, then override, then ``meta``)."""
-    declared = (metadata.get("category") or "").strip().lower()
-    if declared and declared in CATEGORY_BY_ID:
-        return declared
-    return SKILL_CATEGORY_OVERRIDES.get(skill_id, "meta")
-
-
 def _icon_for(skill_id: str, category: str) -> str:
     return SKILL_ICON_OVERRIDES.get(skill_id, CATEGORY_ICONS.get(category, "Compass"))
 
 
-def _load_skill_dir(skill_dir: str) -> Optional[SkillFull]:
+def _load_skill_dir(skill_dir: str, *, default_category: str | None = None) -> Optional[SkillFull]:
     """Load a single skill directory. Returns ``None`` on any failure."""
     skill_md = os.path.join(skill_dir, "SKILL.md")
     if not os.path.isfile(skill_md):
@@ -264,7 +265,13 @@ def _load_skill_dir(skill_dir: str) -> Optional[SkillFull]:
     if not name:
         return None
     description = (metadata.get("description") or "").strip()
-    category = _category_for(name, metadata)
+    declared = (metadata.get("category") or "").strip().lower()
+    if declared in CATEGORY_BY_ID:
+        category = declared
+    elif default_category is not None:
+        category = default_category
+    else:
+        category = SKILL_CATEGORY_OVERRIDES.get(name, "meta")
     icon = _icon_for(name, category)
     label = _humanise(name)
     meta = SkillMeta(
@@ -277,19 +284,28 @@ def _load_skill_dir(skill_dir: str) -> Optional[SkillFull]:
     return SkillFull(meta=meta, body=body.strip(), path=skill_md)
 
 
-def _load_all_skills() -> list[SkillFull]:
-    skills: list[SkillFull] = []
+def _load_all_skills(project_root: str | None = None) -> list[SkillFull]:
+    by_id: dict[str, SkillFull] = {}
     base = _skills_dir()
-    if not os.path.isdir(base):
-        return skills
-    for entry in sorted(os.listdir(base)):
-        full = os.path.join(base, entry)
-        if not os.path.isdir(full):
-            continue
-        loaded = _load_skill_dir(full)
-        if loaded is not None:
-            skills.append(loaded)
-    return skills
+    if os.path.isdir(base):
+        for entry in sorted(os.listdir(base)):
+            full = os.path.join(base, entry)
+            if not os.path.isdir(full):
+                continue
+            loaded = _load_skill_dir(full)
+            if loaded is not None:
+                by_id[loaded.meta.id] = loaded
+    if project_root:
+        project_base = os.path.join(project_root, ".nexcoder", "skills")
+        if os.path.isdir(project_base):
+            for entry in sorted(os.listdir(project_base)):
+                full = os.path.join(project_base, entry)
+                if not os.path.isdir(full):
+                    continue
+                loaded = _load_skill_dir(full, default_category="project")
+                if loaded is not None:
+                    by_id[loaded.meta.id] = loaded  # project wins on collision
+    return list(by_id.values())
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -297,7 +313,7 @@ def _load_all_skills() -> list[SkillFull]:
 # ──────────────────────────────────────────────────────────────────────
 
 
-def get_skills() -> list[dict]:
+def get_skills(project_root: str | None = None) -> list[dict]:
     """Return the list of skills (metadata only) for the React picker.
 
     The shape matches the existing ``Skill`` interface so the UI can
@@ -313,13 +329,13 @@ def get_skills() -> list[dict]:
             "icon": s.meta.icon,
             "shortcut": "",
         }
-        for s in _load_all_skills()
+        for s in _load_all_skills(project_root)
     ]
 
 
-def get_skill(skill_id: str) -> Optional[dict]:
+def get_skill(skill_id: str, project_root: str | None = None) -> Optional[dict]:
     """Return metadata for a single skill, or ``None`` if not found."""
-    for s in _load_all_skills():
+    for s in _load_all_skills(project_root):
         if s.meta.id == skill_id:
             return {
                 "id": s.meta.id,
@@ -332,14 +348,14 @@ def get_skill(skill_id: str) -> Optional[dict]:
     return None
 
 
-def get_skill_body(skill_id: str) -> Optional[dict]:
+def get_skill_body(skill_id: str, project_root: str | None = None) -> Optional[dict]:
     """Return a dict ``{id, name, body, category}`` for *skill_id*.
 
     The body is the markdown content after the frontmatter. Returns
     ``None`` for unknown skill ids so the caller can surface a clear
     error to the model.
     """
-    for s in _load_all_skills():
+    for s in _load_all_skills(project_root):
         if s.meta.id == skill_id:
             return {
                 "id": s.meta.id,
@@ -364,9 +380,9 @@ def get_skill_categories() -> list[dict]:
     ]
 
 
-def get_skills_grouped() -> dict:
+def get_skills_grouped(project_root: str | None = None) -> dict:
     """Return ``{category_id: [skill_meta, ...], categories: [...]}``."""
-    skills = get_skills()
+    skills = get_skills(project_root)
     grouped: dict[str, list[dict]] = {c.id: [] for c in SKILL_CATEGORIES}
     for skill in skills:
         grouped.setdefault(skill["category"], []).append(skill)

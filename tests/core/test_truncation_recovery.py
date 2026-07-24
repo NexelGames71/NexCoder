@@ -1,0 +1,201 @@
+"""The screenshot bug: an oversized write_file call hits the output token
+cap, parsing fails, and raw tool-call JSON must never reach the user."""
+
+import json
+
+from nexcoder.agent.core.stream_gate import scrub_tool_markup
+from nexcoder.agent.core.transport import XmlAdapter
+
+
+def _parse(content: str):
+    return XmlAdapter().parse_assistant_message(
+        {"role": "assistant", "content": content})
+
+
+class TestUnclosedToolCallSalvage:
+    def test_complete_json_without_closing_tag_is_accepted(self):
+        turn = _parse('I will write the file now.\n<tool_call>\n'
+                      + json.dumps({"name": "write_file", "arguments":
+                                    {"path": "style.css", "content": "body{}"}}))
+        assert turn.parse_error is None
+        assert len(turn.tool_calls) == 1
+        assert turn.tool_calls[0].name == "write_file"
+        assert turn.tool_calls[0].args["path"] == "style.css"
+        assert "<tool_call" not in turn.text
+
+    def test_truncated_json_is_not_salvaged(self):
+        turn = _parse('<tool_call>\n{"name": "write_file", "arguments": '
+                      '{"path": "style.css", "content": "* { margin: 0')
+        assert turn.tool_calls == ()
+        # The raw payload stays in text so the loop's truncation
+        # detector can see it — but final text gets scrubbed.
+        assert "<tool_call" in turn.text
+
+
+class TestFinalTextScrub:
+    def test_plain_text_untouched(self):
+        text = "All done. Files changed:\n- style.css"
+        assert scrub_tool_markup(text) == text
+
+    def test_code_fences_survive(self):
+        text = "Run this:\n```bash\npytest -q\n```"
+        assert scrub_tool_markup(text) == text
+
+    def test_truncated_tool_call_is_removed(self):
+        text = ('First, I will create the style.css file:\n<tool_call>\n'
+                '{"name": "write_file", "arguments": {"content": "'
+                + "x" * 5000)
+        out = scrub_tool_markup(text)
+        assert "<tool_call" not in out
+        assert "x" * 100 not in out
+        assert "First, I will create the style.css file:" in out
+        assert "malformed tool call was removed" in out
+
+    def test_bare_json_call_is_removed(self):
+        out = scrub_tool_markup('{"name": "write_file", "arguments": {}}')
+        assert '"write_file"' not in out
+        assert "malformed tool call was removed" in out
+
+
+class TestTruncatedWriteSalvage:
+    def _truncated_call(self, content_fragment: str) -> str:
+        return ('Creating the file now:\n<tool_call>\n{"name": "write_file", '
+                '"arguments": {"path": "style.css", "content": "'
+                + content_fragment)
+
+    def test_salvages_path_and_partial_content(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        fragment = "body { margin: 0 }\\n" * 30
+        call = salvage_truncated_write(self._truncated_call(fragment))
+        assert call is not None
+        assert call.name == "write_file"
+        assert call.args["path"] == "style.css"
+        assert call.args["content"].startswith("body { margin: 0 }\n")
+
+    def test_trailing_incomplete_escape_is_trimmed(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        fragment = ("x" * 300) + "\\"  # cut mid-escape
+        call = salvage_truncated_write(self._truncated_call(fragment))
+        assert call is not None
+        assert call.args["content"] == "x" * 300
+
+    def test_tiny_fragments_are_not_salvaged(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        assert salvage_truncated_write(self._truncated_call("abc")) is None
+
+    def test_non_write_calls_are_not_salvaged(self):
+        from nexcoder.agent.core.transport import salvage_truncated_write
+        raw = ('<tool_call>\n{"name": "run_command", "arguments": '
+               '{"command": "' + "y" * 500)
+        assert salvage_truncated_write(raw) is None
+
+
+class TestDedupeSalvagedWrite:
+    def test_first_salvage_writes_everything(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        assert dedupe_salvaged_write("", "abc") == ("abc", False)
+
+    def test_repeat_full_rewrite_becomes_append_of_tail(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        existing = "body { margin: 0 }\n"
+        content = existing + ".nav { color: red }\n"
+        assert dedupe_salvaged_write(existing, content) == (
+            ".nav { color: red }\n", True)
+
+    def test_no_new_content_returns_none(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        assert dedupe_salvaged_write("abcdef", "abcdef") is None
+        assert dedupe_salvaged_write("abcdef", "abc") is None
+
+    def test_diverged_content_overwrites(self):
+        from nexcoder.agent.core.transport import dedupe_salvaged_write
+        assert dedupe_salvaged_write("old stuff", "totally new") == (
+            "totally new", False)
+
+
+class TestConversationFragmentEviction:
+    def test_replace_last_content_stubs_the_fragment(self):
+        from nexcoder.agent.core.conversation import Conversation
+        convo = Conversation("system prompt", context_window=8192)
+        convo.add({"role": "user", "content": "write the css"})
+        convo.add({"role": "assistant", "content": "<tool_call>" + "x" * 20000})
+        before = convo.total_tokens()
+        convo.replace_last_content("[oversized tool call removed]")
+        after = convo.total_tokens()
+        assert after < before / 10
+        assert convo.messages()[-1]["content"] == "[oversized tool call removed]"
+        assert convo.messages()[-1]["role"] == "assistant"
+
+    def test_replace_last_never_touches_system(self):
+        from nexcoder.agent.core.conversation import Conversation
+        convo = Conversation("system prompt")
+        convo.replace_last_content("stub")
+        assert convo.messages()[0]["content"] == "system prompt"
+
+
+class TestEditAppliedDiffPayloads:
+    def _run(self, tmp_path, tool, args, events):
+        from nexcoder.agent.core.belt_factory import build_default_belt
+        from nexcoder.agent.core.tools.base import ToolContext
+        ctx = ToolContext(project_root=tmp_path, emit=events.append,
+                          run_id="t")
+        return build_default_belt().execute(tool, args, ctx)
+
+    def _edit_event(self, events):
+        return next(e.payload for e in events if e.type == "edit_applied")
+
+    def test_write_file_emits_real_diff_with_counts(self, tmp_path):
+        events = []
+        result = self._run(tmp_path, "write_file", {
+            "path": "a.css", "content": "one\ntwo\nthree\n"}, events)
+        assert result["success"]
+        payload = self._edit_event(events)
+        assert payload["added"] == 3 and payload["removed"] == 0
+        assert "+one" in payload["diff"]
+        assert "full file write" not in payload["diff"]
+
+    def test_append_diff_shows_only_additions(self, tmp_path):
+        (tmp_path / "a.css").write_text("one\n", encoding="utf-8")
+        events = []
+        self._run(tmp_path, "write_file", {
+            "path": "a.css", "content": "two\n", "append": True}, events)
+        payload = self._edit_event(events)
+        assert payload["added"] == 1 and payload["removed"] == 0
+        assert "+two" in payload["diff"]
+
+    def test_overwrite_counts_removals(self, tmp_path):
+        (tmp_path / "a.css").write_text("old1\nold2\n", encoding="utf-8")
+        events = []
+        self._run(tmp_path, "write_file", {
+            "path": "a.css", "content": "new\n"}, events)
+        payload = self._edit_event(events)
+        assert payload["added"] == 1 and payload["removed"] == 2
+
+
+class TestWriteFileAppend:
+    def test_append_extends_existing_file(self, tmp_path):
+        from nexcoder.agent.core.belt_factory import build_default_belt
+        from nexcoder.agent.core.tools.base import ToolContext
+        belt = build_default_belt()
+        ctx = ToolContext(project_root=tmp_path, emit=lambda _e: None,
+                          run_id="t")
+        first = belt.execute("write_file", {
+            "path": "style.css", "content": "body { margin: 0 }\n"}, ctx)
+        assert first["success"]
+        second = belt.execute("write_file", {
+            "path": "style.css", "content": ".nav { color: red }\n",
+            "append": True}, ctx)
+        assert second["success"]
+        text = (tmp_path / "style.css").read_text(encoding="utf-8")
+        assert text == "body { margin: 0 }\n.nav { color: red }\n"
+
+    def test_append_to_missing_file_creates_it(self, tmp_path):
+        from nexcoder.agent.core.belt_factory import build_default_belt
+        from nexcoder.agent.core.tools.base import ToolContext
+        belt = build_default_belt()
+        ctx = ToolContext(project_root=tmp_path, emit=lambda _e: None,
+                          run_id="t")
+        result = belt.execute("write_file", {
+            "path": "new.txt", "content": "hello", "append": True}, ctx)
+        assert result["success"]
+        assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "hello"

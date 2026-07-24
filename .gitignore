@@ -27,6 +27,12 @@ env/
 # NexCoder local data
 .nexcoder/
 
+# Local agent / IDE scratch
+.agents/
+.claude/
+.diag-scratch/
+.pytest_cache/
+
 # Node / React frontend
 nexcoder/ui/node_modules/
 nexcoder/ui/dist/
@@ -35,6 +41,7 @@ nexcoder/resources/ui/
 # PyInstaller
 *.spec.bak
 dist/
+dist_*/
 build/
 
 # OS
@@ -52,3 +59,5 @@ models/coder/
 # Agent e2e scratch folders
 agent-e2e-*/
 agent-plan-e2e*/
+
+language-servers/node_modules/

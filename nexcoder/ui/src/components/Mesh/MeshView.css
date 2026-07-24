@@ -1,0 +1,140 @@
+/* Full-screen Mesh View — static, truthful layout; the only motion is a
+   subtle pulse on running nodes (disabled under reduced motion). */
+
+.meshview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 210;
+}
+
+.meshview-window {
+  width: min(1020px, 94vw);
+  height: min(700px, 90vh);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.meshview-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.meshview-goal {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46%;
+}
+
+.meshview-meta { font-size: var(--font-size-xs); color: var(--text-tertiary); }
+
+.meshview-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.meshview-graph {
+  flex: 1.4;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.meshview-side {
+  flex: 1;
+  border-left: 1px solid var(--border);
+  padding: var(--space-3);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 280px;
+}
+
+/* Nodes */
+.mesh-node {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  min-width: 170px;
+  max-width: 210px;
+}
+
+.mesh-node.selected { border-color: var(--accent-purple); box-shadow: 0 0 0 1px var(--accent-purple); }
+.mesh-node-orchestrator { cursor: default; border-color: var(--accent-purple); background: color-mix(in srgb, var(--accent-purple) 8%, var(--bg-deep)); }
+.mesh-node-name { font-size: var(--font-size-xs); font-weight: 700; color: var(--text-primary); }
+.mesh-node-sub { font-size: 10.5px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.mesh-node-info { min-width: 0; }
+.mesh-node-foot { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.mesh-node-files { font-size: 10px; color: var(--text-secondary); }
+.mesh-node-deps { font-size: 9.5px; color: var(--text-tertiary); margin-top: 3px; font-style: italic; }
+
+.mesh-node-completed { opacity: 0.75; }
+.mesh-node-failed { border-color: var(--accent-red, #ef4444); }
+.mesh-node-blocked, .mesh-node-cancelled { opacity: 0.55; border-style: dashed; }
+.mesh-node.running, .mesh-node-running { animation: mesh-pulse 1.6s ease-in-out infinite; }
+
+@keyframes mesh-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-purple) 35%, transparent); }
+  50% { box-shadow: 0 0 0 5px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesh-node.running, .mesh-node-running { animation: none; }
+}
+
+/* Links: stem from orchestrator, rail across, drops into each agent */
+.meshview-stem { width: 1px; height: 22px; background: var(--border-active); }
+.meshview-rail {
+  height: 1px;
+  background: var(--border-active);
+  align-self: stretch;
+  margin: 0 60px;
+}
+.meshview-agents {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+}
+.meshview-agent-slot { display: flex; flex-direction: column; align-items: center; }
+.meshview-drop { width: 1px; height: 16px; background: var(--border-active); }
+
+.meshview-conflicts { margin-top: var(--space-4); align-self: stretch; }
+.meshview-report { margin-top: var(--space-4); align-self: stretch; }
+.meshview-empty { color: var(--text-tertiary); font-size: var(--font-size-xs); padding: var(--space-4); text-align: center; }
+
+.meshview-inspector { display: flex; flex-direction: column; gap: var(--space-2); }
+.meshview-timeline {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-deep);
+  padding: var(--space-2);
+}

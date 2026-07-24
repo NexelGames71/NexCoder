@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { FolderOpen, Code, Cpu, Terminal, GitBranch, Settings } from 'lucide-react';
-import { openFolderDialog, getRecentProjects, openProject } from '../../services/bridge';
+import { FolderOpen, FileText, Code, Cpu, Terminal, GitBranch, Settings } from 'lucide-react';
+import { openFolderDialog, openFileDialog, getRecentProjects, openProject } from '../../services/bridge';
 import { useProjectStore } from '../../store/useProjectStore';
+import CloneRepositoryDialog from './CloneRepositoryDialog';
 
 export default function WelcomeScreen() {
   const [recent, setRecent] = useState<any[]>([]);
+  const [showCloneDialog, setShowCloneDialog] = useState(false);
   const { setLoading } = useProjectStore();
 
   useEffect(() => {
@@ -19,6 +21,17 @@ export default function WelcomeScreen() {
     setLoading(true);
     try {
       await openFolderDialog();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenFile = async () => {
+    setLoading(true);
+    try {
+      await openFileDialog();
     } catch (e) {
       console.error(e);
     } finally {
@@ -53,8 +66,14 @@ export default function WelcomeScreen() {
           {/* Quick Start */}
           <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)' }}>
             <h3 style={{ fontSize: 'var(--font-size-md)', fontWeight: '600', marginBottom: 'var(--space-3)' }}>Start</h3>
-            <button className="btn btn-primary w-full" onClick={handleOpenFolder} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-2)' }}>
-              <FolderOpen size={16} /> Open Folder...
+            <button className="btn btn-primary w-full" onClick={handleOpenFolder} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-1)', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+              <FolderOpen size={14} /> Open Folder...
+            </button>
+            <button className="btn btn-primary w-full" onClick={handleOpenFile} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-1)', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+              <FileText size={14} /> Open File...
+            </button>
+            <button className="btn btn-primary w-full" onClick={() => setShowCloneDialog(true)} style={{ justifyContent: 'flex-start', marginBottom: 'var(--space-1)', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+              <GitBranch size={14} /> Clone Repository...
             </button>
             <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-2)' }}>
               Open an existing directory to start editing and using the AI Agent.
@@ -117,6 +136,9 @@ export default function WelcomeScreen() {
           </div>
         </div>
       </div>
+      {showCloneDialog && (
+        <CloneRepositoryDialog onClose={() => setShowCloneDialog(false)} />
+      )}
     </div>
   );
 }

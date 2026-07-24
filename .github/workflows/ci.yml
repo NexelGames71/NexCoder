@@ -1,0 +1,107 @@
+name: NexCoder CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: nexcoder-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            nexcoder/ui/package-lock.json
+            language-servers/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q nexcoder
+
+      - name: Run Python tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Build frontend
+        working-directory: nexcoder/ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Validate greenfield behavior contract
+        run: node tests/e2e/verify_product_page.mjs tests/e2e/fixtures/greenfield_contract
+
+      - name: Install locked language servers
+        working-directory: language-servers
+        run: npm ci --omit=dev
+
+  package-smoke:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            nexcoder/ui/package-lock.json
+            language-servers/package-lock.json
+
+      - name: Install build dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build UI
+        working-directory: nexcoder/ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare language servers
+        working-directory: language-servers
+        run: npm ci --omit=dev
+
+      - name: Package NexCoder
+        run: python -m PyInstaller --clean -y nexcoder.spec
+
+      - name: Verify packaged runtime inputs
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist/NexCoder/NexCoder.exe)) { throw "NexCoder.exe missing" }
+          if (-not (Test-Path dist/NexCoder/_internal/language-servers/node.exe)) { throw "Bundled Node runtime missing" }
+          if (-not (Test-Path dist/NexCoder/_internal/language-servers/node_modules/pyright/langserver.index.js)) { throw "Pyright missing" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexCoder-windows-smoke
+          path: dist/NexCoder
+          retention-days: 7

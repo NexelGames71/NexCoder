@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, ArchiveRestore, MessageSquarePlus, Trash2 } from 'lucide-react';
-import { createSession, archiveSession, deleteSession, listSessions, loadSession } from '../../services/bridge';
+import { createSession, archiveSession, deleteSession, getBridge, getPlan, listSessions, loadSession } from '../../services/bridge';
 import { useChatStore } from '../../store/useChatStore';
 import { useProjectStore } from '../../store/useProjectStore';
 import { ChatMessage, SessionMetadata, StoredSessionMessage } from '../../types';
+import { usePlanStore } from '../../store/usePlanStore';
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -16,11 +17,25 @@ function toChatMessage(message: StoredSessionMessage, index: number): ChatMessag
   const role = message.role === 'user' || message.role === 'assistant' || message.role === 'system'
     ? message.role
     : 'assistant';
+  const attachments = Array.isArray(message.metadata?.attachments)
+    ? message.metadata.attachments.map((attachment: any, attachmentIndex: number) => ({
+        id: String(attachment.id || `history-image-${index}-${attachmentIndex}`),
+        name: String(attachment.name || 'Attached image'),
+        mimeType: String(attachment.mime_type || attachment.mimeType || 'image/unknown'),
+        size: Number(attachment.size || 0),
+      }))
+    : [];
   return {
-    id: `${message.created_at || Date.now()}-${index}`,
+    id: String(message.metadata?.client_prompt_id || `${message.created_at || Date.now()}-${index}`),
     role,
     content: message.content,
     timestamp: Number.isNaN(created) ? Date.now() : created,
+    attachments,
+    clientPromptId: message.metadata?.client_prompt_id
+      ? String(message.metadata.client_prompt_id)
+      : undefined,
+    sessionMessageIndex: index,
+    isSteering: message.metadata?.mode === 'steer',
   };
 }
 
@@ -59,6 +74,16 @@ export default function ChatHistoryPanel() {
     refresh();
   }, [projectPath]);
 
+  // New runs create/update sessions on disk — refresh the list when a
+  // run completes so the chat shows up without a manual Refresh.
+  useEffect(() => {
+    const signal = getBridge()?.agent_complete;
+    if (typeof signal?.connect !== 'function') return;
+    const onComplete = () => { refresh(); };
+    signal.connect(onComplete);
+    return () => signal.disconnect(onComplete);
+  }, [projectPath]);
+
   const visibleSessions = useMemo(() => {
     const lower = query.trim().toLowerCase();
     return sessions.filter((session) => {
@@ -75,6 +100,7 @@ export default function ChatHistoryPanel() {
 
   const handleNewChat = async () => {
     clearChat();
+    usePlanStore.getState().reset();
     if (!projectPath) return;
     const res = await createSession(projectPath, 'New session', activeMode || 'ask');
     if (res?.success && res.metadata) {
@@ -91,6 +117,13 @@ export default function ChatHistoryPanel() {
     setMessages(messages);
     setActiveSessionId(session.session_id);
     if (res.metadata) upsertSession(res.metadata);
+    const planId = String(res.metadata?.plan_id || session.plan_id || '');
+    if (planId) {
+      const planResult = await getPlan(planId);
+      if (!planResult?.success) usePlanStore.getState().reset();
+    } else {
+      usePlanStore.getState().reset();
+    }
   };
 
   const handleArchive = async (session: SessionMetadata, archived: boolean) => {

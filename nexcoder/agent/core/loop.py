@@ -1,0 +1,752 @@
+"""AgentLoop — the canonical agentic loop.
+
+messages -> model -> tool calls -> results -> repeat, until the model
+answers with no tool calls, guardrails stall it, or the turn cap hits.
+Mode-specific behaviour lives in the system prompt and belt, never here.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from pathlib import Path
+import platform
+import re
+from typing import Any, Callable, Protocol
+import uuid
+
+from nexcoder.agent.cancellation import CancellationToken
+from nexcoder.agent.core.conversation import Conversation
+from nexcoder.agent.errors import (
+    AgentCancelledError, ModelHTTPError, ModelStreamError,
+)
+from nexcoder.agent.image_inputs import (
+    build_user_content, messages_for_persistence, persistence_safe_content,
+)
+from nexcoder.agent.model_connector import strip_reasoning_markup
+from nexcoder.agent.core.events import AgentEvent, EventCallback
+from nexcoder.agent.core.session_store import SessionStore
+from nexcoder.agent.core.stream_gate import StreamGate, scrub_tool_markup
+from nexcoder.agent.core.tools.base import PermissionGate, ToolBelt, ToolContext
+from nexcoder.agent.core.transport import (
+    ToolCallAdapter, dedupe_salvaged_write, salvage_truncated_write,
+)
+from nexcoder.agent.tool_guardrails import ToolGuardrailConfig, ToolGuardrailController
+from nexcoder.agent.trajectory import AgentTrajectoryRecorder
+
+logger = logging.getLogger(__name__)
+
+MAX_GUARDRAIL_BLOCKS = 6
+MAX_NO_TOOL_NUDGES = 2
+
+_STREAM_NAME_RE = re.compile(r'"name"\s*:\s*"([a-z_]+)"')
+_STREAM_PATH_RE = re.compile(r'"path"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _peek_streaming_tool(head: str) -> tuple[str, str]:
+    """Best-effort (tool, path) from the head of a streaming tool call.
+
+    Used only for the live 'writing…' progress event, so partial or
+    missing matches just yield empty strings — never raises.
+    """
+    name_match = _STREAM_NAME_RE.search(head)
+    path_match = _STREAM_PATH_RE.search(head)
+    path = ""
+    if path_match:
+        try:
+            path = json.loads(f'"{path_match.group(1)}"')
+        except (ValueError, json.JSONDecodeError):
+            path = path_match.group(1)
+    return (name_match.group(1) if name_match else "", path)
+
+
+def prepare_resume_messages(messages: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return a provider-valid, reasoning-free prior agent transcript.
+
+    A native assistant tool-call message is only valid when all of its tool
+    results follow it. Failed/cancelled runs can end between those two states;
+    replaying that dangling call makes OpenAI-compatible APIs reject the next
+    request with HTTP 400. Drop incomplete groups and their generated parse
+    correction while retaining every complete read/edit/result turn.
+    """
+    source = [dict(item) for item in (messages or [])
+              if isinstance(item, dict) and item.get("role") != "system"]
+    prepared: list[dict[str, Any]] = []
+    index = 0
+    drop_parse_correction = False
+    while index < len(source):
+        message = source[index]
+        role = str(message.get("role") or "")
+        if role == "assistant":
+            cleaned = {
+                key: value for key, value in message.items()
+                if not str(key).startswith("_")
+            }
+            safe_content = persistence_safe_content(message.get("content"))
+            cleaned["content"] = strip_reasoning_markup(
+                str(safe_content or ""))
+            calls = list(cleaned.get("tool_calls") or [])
+            if calls:
+                expected = {
+                    str(call.get("id") or "") for call in calls
+                    if isinstance(call, dict) and call.get("id")
+                }
+                results: list[dict[str, Any]] = []
+                cursor = index + 1
+                while cursor < len(source) and source[cursor].get("role") == "tool":
+                    results.append(source[cursor])
+                    cursor += 1
+                received = {str(item.get("tool_call_id") or "") for item in results}
+                if expected and expected.issubset(received):
+                    prepared.append(cleaned)
+                    prepared.extend({
+                        key: value for key, value in item.items()
+                        if not str(key).startswith("_")
+                    } for item in results)
+                    index = cursor
+                    drop_parse_correction = False
+                    continue
+                drop_parse_correction = True
+                index = cursor
+                continue
+            if cleaned["content"]:
+                prepared.append(cleaned)
+            drop_parse_correction = False
+        elif role == "user":
+            content = str(persistence_safe_content(
+                message.get("content")) or "")
+            if drop_parse_correction and content.startswith("Tool call error:"):
+                drop_parse_correction = False
+            elif content:
+                prepared.append({"role": "user", "content": content})
+                drop_parse_correction = False
+        # Orphan tool results are invalid and intentionally ignored.
+        index += 1
+    return prepared
+
+NO_TOOL_NUDGE = (
+    "You have not called any tools yet, so nothing has actually happened in "
+    "the project. Printing code in markdown fences does NOT create files. "
+    "Act now by emitting tool calls in this exact format:\n"
+    "<tool_call>\n"
+    '{"name": "write_file", "arguments": {"path": "index.html", "content": "..."}}\n'
+    "</tool_call>"
+)
+
+AGENT_SYSTEM_PROMPT = """You are NexCoder, an autonomous coding agent working \
+inside the user's project.
+
+How you work:
+0. Only act when the user gives you an actual task. Greetings, questions, \
+and casual conversation get a direct plain-text reply — no tool calls, no \
+files created, nothing changed. Never invent work the user did not ask for.
+1. On non-trivial tasks, call todo_write first with your plan, and keep \
+statuses current as you complete each step.
+2. Inspect before you change: use glob/grep/read_file to find and understand \
+the relevant code. Never invent file contents. grep, glob, and code_search \
+accept either a project-relative file or directory in their path argument. \
+If a tool rejects an argument, use the error to correct the next call; do not \
+burn turns on minor variations of the same failed search.
+3. Edit precisely and in small steps. To change an existing file, ALWAYS \
+use edit_file with a unique old_string — never rewrite a whole file to \
+change part of it. Several small edit_file calls are far better than one \
+big write_file: each is fast, safe, and its diff is easy to review. Use \
+write_file only to CREATE a new file or fully replace a tiny one. When you \
+must write a long new file (over ~100 lines), write it in parts: \
+write_file for the first part, then write_file with append=true for each \
+following part — one oversized call gets cut off and executes nothing.
+4. Verify your work: after making changes, run a verification command \
+(tests, build, or a quick check) with run_command. If it fails, read the \
+error, fix the code, and verify again before finishing.
+5. Build durable knowledge: when you discover a non-obvious project fact \
+you needed to work this task — the build/test/run commands, where a \
+subsystem lives, an architectural decision, a gotcha — save it with the \
+remember tool (one short sentence each). The "Project memory" section of \
+this prompt is what past runs saved; trust it instead of re-discovering, \
+and don't re-save what it already says.
+6. When the task is fully complete and verified, reply with a short plain-text \
+summary of what changed and how it was verified. No tool calls in that final \
+message."""
+
+
+class ModelClient(Protocol):
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        extras: dict[str, Any],
+        on_delta: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]: ...
+
+
+class AgentLoop:
+    def __init__(
+        self,
+        *,
+        project_root: str | Path,
+        model: ModelClient,
+        adapter: ToolCallAdapter,
+        belt: ToolBelt,
+        system_prompt: str,
+        emit: EventCallback | None = None,
+        permission_gate: PermissionGate | None = None,
+        max_turns: int = 50,
+        context_window: int = 8192,
+        reserve_output: int = 6144,
+        extra_system: str = "",
+        trajectory_mode: str = "agent",
+        guardrail_config: ToolGuardrailConfig | None = None,
+        session_store: SessionStore | None = None,
+        cancel_token: CancellationToken | None = None,
+        steering_source: Callable[[], list[Any]] | None = None,
+        plan_manager: Any = None,
+        plan_id: str = "",
+        plan_revision: int = 0,
+    ) -> None:
+        self.project_root = Path(project_root).resolve()
+        self.model = model
+        self.adapter = adapter
+        self.belt = belt
+        self.system_prompt = system_prompt
+        self.emit: EventCallback = emit or (lambda _event: None)
+        self.permission_gate = permission_gate
+        self.max_turns = max_turns
+        self.context_window = context_window
+        self.reserve_output = reserve_output
+        self.extra_system = extra_system
+        self.trajectory_mode = trajectory_mode
+        # Re-running the same command is the verify -> fix -> re-verify loop,
+        # not a stuck agent; exempt it from exact-repeat blocking by default.
+        self.guardrail_config = guardrail_config or ToolGuardrailConfig(
+            exempt_repeat_tools=frozenset({"run_command"}))
+        self.session_store = session_store
+        self.cancel_token = cancel_token
+        self.steering_source = steering_source
+        self.plan_manager = plan_manager
+        self.plan_id = plan_id
+        self.plan_revision = plan_revision
+
+    def _summarize(self, old_messages: list[dict[str, Any]]) -> str:
+        transcript = "\n".join(
+            f"{m.get('role')}: "
+            f"{str(persistence_safe_content(m.get('content')))[:400]}"
+            for m in old_messages)
+        prompt = [
+            {"role": "system", "content":
+             "Summarize this agent transcript in under 200 words. Keep: the "
+             "task, files touched, decisions made, and current state."},
+            {"role": "user", "content": transcript[:12000]},
+        ]
+        try:
+            message = self.model.complete(prompt, extras={}, on_delta=None)
+            return str(message.get("content") or "").strip() or "(no summary)"
+        except Exception as exc:
+            logger.warning("Compaction summarizer failed: %s", exc)
+            return "(summary unavailable)"
+
+    def _safe_project_file(self, relative: str) -> Path | None:
+        """Resolve a project-relative path, or None if it escapes the root."""
+        if not relative:
+            return None
+        try:
+            candidate = (Path(self.project_root) / relative).resolve()
+            candidate.relative_to(Path(self.project_root).resolve())
+            return candidate
+        except (ValueError, OSError):
+            return None
+
+    def run(
+        self,
+        task: str,
+        *,
+        preload_skill: str | None = None,
+        resume_messages: list[dict[str, Any]] | None = None,
+        input_attachments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
+        ctx = ToolContext(
+            project_root=self.project_root, emit=self.emit,
+            permission_gate=self.permission_gate, run_id=run_id,
+            cancel_token=self.cancel_token, plan_manager=self.plan_manager,
+            plan_id=self.plan_id, plan_revision=self.plan_revision)
+        try:
+            # Agent state must never end up in the user's commits.
+            nexcoder_dir = self.project_root / ".nexcoder"
+            nexcoder_dir.mkdir(parents=True, exist_ok=True)
+            ignore = nexcoder_dir / ".gitignore"
+            if not ignore.exists():
+                ignore.write_text("*\n", encoding="utf-8")
+        except OSError:
+            logger.warning("Could not seed .nexcoder/.gitignore", exc_info=True)
+
+        schemas = self.belt.schemas()
+        system = self.system_prompt
+        if platform.system() == "Windows":
+            system += ("\n\nEnvironment: Windows. run_command uses cmd.exe — "
+                       "use double quotes in commands (single quotes are not "
+                       "quoting), and && to chain.")
+        if self.extra_system:
+            system += "\n\n" + self.extra_system
+        from nexcoder.agent.core.memory import load_project_memory
+        project_memory = ("" if os.getenv("NEXCODER_MEMORY", "1") == "0"
+                          else load_project_memory(self.project_root))
+        if project_memory:
+            system += ("\n\n# Project memory (durable facts from earlier "
+                       "sessions; trust unless the code contradicts them)\n"
+                       + project_memory)
+        # The preloaded skill must live INSIDE the first system message:
+        # several chat-template formatters (llama-cpp-python chatml among
+        # them) silently drop every system message after the first.
+        preload_warning = ""
+        if preload_skill:
+            from nexcoder.agent.skills_registry import get_skill_body
+            record = get_skill_body(preload_skill, str(self.project_root))
+            if record is None:
+                preload_warning = f"Unknown skill: {preload_skill}"
+            else:
+                system += (f"\n\n[Skill: {preload_skill}] — workflow guidance, "
+                           "not a tool. Follow it using the available tools.\n"
+                           f"{record['body']}")
+                ctx.preloaded_skill = preload_skill
+        system += self.adapter.system_prompt_suffix(schemas)
+        conversation = Conversation(
+            system, context_window=self.context_window,
+            reserve_output=self.reserve_output)
+        for prior_message in prepare_resume_messages(resume_messages):
+            conversation.add(prior_message)
+        conversation.add({
+            "role": "user",
+            "content": build_user_content(task, input_attachments or []),
+        })
+        guardrails = ToolGuardrailController(self.guardrail_config)
+        trajectory = AgentTrajectoryRecorder(
+            self.project_root, task=task, mode=self.trajectory_mode)
+        extras = self.adapter.request_extras(schemas)
+        # The connector's default output cap predates the bigger reserve;
+        # the loop's reserve_output is the single source of truth.
+        extras.setdefault("max_tokens", self.reserve_output)
+        try:
+            extras.setdefault("temperature", min(2.0, max(
+                0.0, float(os.getenv("NEXCODER_TEMPERATURE", "0.2")))))
+        except ValueError:
+            pass
+
+        def _persist(current_status: str, turn_number: int) -> None:
+            if self.session_store is None:
+                return
+            try:
+                self.session_store.save(run_id, {
+                    "task": task, "status": current_status,
+                    "messages": messages_for_persistence(
+                        conversation.messages()),
+                    "todos": ctx.todos, "turn": turn_number})
+            except Exception:
+                logger.warning("Session persist failed", exc_info=True)
+
+        started_payload: dict[str, Any] = {"run_id": run_id, "task": task}
+        if preload_warning:
+            started_payload["preload_warning"] = preload_warning
+        self.emit(AgentEvent("run_started", started_payload))
+        status = "max_turns"
+        final_text = ""
+        blocked_total = 0
+        turns_used = 0
+        made_tool_call = False
+        nudges = 0
+        truncation_retries = 0
+        salvage_writes = 0
+        stream_retries = 0
+        context_retry_done = False
+
+        def _apply_steering(turn_number: int) -> bool:
+            """Inject queued follow-ups only between model/tool turns."""
+            if self.steering_source is None:
+                return False
+            try:
+                updates = list(self.steering_source())
+            except Exception:
+                logger.warning("Could not read steering updates", exc_info=True)
+                return False
+            applied = False
+            for update in updates:
+                if isinstance(update, dict):
+                    text = str(update.get("text") or "").strip()
+                    attachments = list(update.get("attachments") or [])
+                else:
+                    text = str(update).strip()
+                    attachments = []
+                if not text and not attachments:
+                    continue
+                prompt = (
+                    "[Follow-up from the user while you were working]\n"
+                    + (text or "Analyze the attached image and apply it to the task.")
+                )
+                conversation.add({
+                    "role": "user",
+                    "content": build_user_content(prompt, attachments),
+                })
+                trajectory.record("user_steer", {
+                    "text": text,
+                    "image_count": len(attachments),
+                })
+                self.emit(AgentEvent("steering_applied", {
+                    "text": text, "turn": turn_number, "run_id": run_id,
+                    "image_count": len(attachments),
+                }))
+                applied = True
+            return applied
+
+        try:
+            for turn in range(1, self.max_turns + 1):
+                turns_used = turn
+                if self.cancel_token is not None:
+                    self.cancel_token.raise_if_cancelled()
+                _apply_steering(turn)
+                self.emit(AgentEvent("turn_started", {"turn": turn, "run_id": run_id}))
+
+                if conversation.needs_compaction():
+                    stats = conversation.compact(self._summarize)
+                    # Compacted results are gone from context; the model may
+                    # legitimately need to re-run reads it already made.
+                    guardrails.note_context_compacted()
+                    self.emit(AgentEvent("compaction", stats))
+
+                # Hard guarantee we fit the backend context window even if
+                # the token estimator undercounts dense code/JSON.
+                conversation.force_fit()
+
+                tokens = conversation.total_tokens()
+                self.emit(AgentEvent("context_usage", {
+                    "tokens": tokens,
+                    "budget": conversation.input_budget,
+                    "window": conversation.context_window,
+                    "percent": min(100, round(100 * tokens / conversation.input_budget)),
+                    "turn": turn,
+                }))
+
+                # Stream prose live but suppress tool-call markup; the
+                # parsed calls surface as tool_started/tool_result events.
+                # The delta callback doubles as the mid-stream cancel point:
+                # raising here aborts the HTTP stream promptly.
+                def _emit_delta(text: str, _turn: int = turn) -> None:
+                    if self.cancel_token is not None:
+                        self.cancel_token.raise_if_cancelled()
+                    self.emit(AgentEvent("text_delta", {"text": text, "turn": _turn}))
+
+                # While a tool call streams the gate goes silent — a big
+                # write can take minutes. Report progress so the UI shows
+                # a live "writing…" tick, and keep the cancel check alive
+                # here (the muted text path no longer runs it).
+                def _on_swallowed(chars: int, head: str, _turn: int = turn) -> None:
+                    if self.cancel_token is not None:
+                        self.cancel_token.raise_if_cancelled()
+                    tool, path = _peek_streaming_tool(head)
+                    self.emit(AgentEvent("tool_streaming", {
+                        "tool": tool, "path": path, "chars": chars,
+                        "turn": _turn}))
+
+                gate = StreamGate(_emit_delta, on_swallowed=_on_swallowed)
+                try:
+                    message = self.model.complete(
+                        conversation.payload_messages(), extras=extras,
+                        on_delta=gate.push)
+                except ModelHTTPError as exc:
+                    # Backend rejected the request for exceeding its context
+                    # window: aggressively shrink and retry once before the
+                    # loop's outer handler treats it as fatal.
+                    if "context" in str(exc).lower() and not context_retry_done:
+                        context_retry_done = True
+                        conversation.context_window = max(
+                            2048, int(conversation.context_window * 0.75))
+                        conversation.force_fit()
+                        self.emit(AgentEvent("compaction",
+                                             {"reason": "context_overflow_retry"}))
+                        continue
+                    raise
+                except ModelStreamError:
+                    # The backend dropped the stream mid-response (server
+                    # restart, crash, network blip). The conversation is
+                    # unchanged, so retrying the turn is safe — give the
+                    # server a moment to come back before giving up.
+                    if stream_retries < 2:
+                        stream_retries += 1
+                        trajectory.record("stream_retry",
+                                          {"attempt": stream_retries})
+                        self.emit(AgentEvent("stream_retry", {
+                            "attempt": stream_retries, "turn": turn}))
+                        import time
+                        time.sleep(3 * stream_retries)
+                        continue
+                    raise
+                gate.flush()
+                conversation.add(message)
+                # The backend's real prompt size (when reported) corrects
+                # the estimator, so the meter and compaction stay honest.
+                usage = message.get("_usage") or {}
+                actual_prompt = int(usage.get("prompt_tokens") or 0)
+                if actual_prompt > 0:
+                    conversation.calibrate(actual_prompt, tokens)
+                    updated = conversation.total_tokens()
+                    self.emit(AgentEvent("context_usage", {
+                        "tokens": updated,
+                        "budget": conversation.input_budget,
+                        "window": conversation.context_window,
+                        "percent": min(100, round(
+                            100 * updated / conversation.input_budget)),
+                        "turn": turn,
+                        "calibrated": True,
+                    }))
+                turn_data = self.adapter.parse_assistant_message(message)
+
+                if turn_data.parse_error:
+                    trajectory.record("parse_error", {"error": turn_data.parse_error})
+                    # Native APIs require every assistant tool_calls message
+                    # to be followed by matching tool results. A malformed
+                    # JSON argument cannot be executed, so retaining that raw
+                    # assistant turn creates a dangling call and the next API
+                    # request fails with HTTP 400. Replace it with a safe stub
+                    # before asking the model to retry in smaller chunks.
+                    conversation.replace_last_content(
+                        "[invalid or incomplete tool call removed]")
+                    conversation.add({"role": "user", "content":
+                                      f"Tool call error: {turn_data.parse_error}. "
+                                      "Re-emit it with valid JSON arguments. "
+                                      "Keep each write under about 100 lines; "
+                                      "use append=true for later parts."})
+                    continue
+
+                # Output hit the token cap mid tool call: the raw fragment
+                # parses as neither a call nor sane prose. Ask for a re-emit
+                # instead of accepting the truncated text as an answer.
+                raw_content = str(message.get("content") or "")
+                looks_truncated = (
+                    not turn_data.tool_calls
+                    and ("<tool_call" in raw_content.rsplit("</tool_call>", 1)[-1]
+                         or raw_content.rstrip().endswith('{"name"')))
+                if looks_truncated:
+                    # The raw multi-thousand-token fragment must never stay
+                    # in history: it crowds out real context, thrashes the
+                    # compactor, and slows every following turn.
+                    conversation.replace_last_content(
+                        "[emitted an oversized tool call that was cut off "
+                        "by the output limit; removed to save context]")
+                    # Deterministic recovery: write the partial content that
+                    # DID arrive, deduped against what a previous salvage
+                    # already wrote — repeated full rewrites become
+                    # incremental appends, so every attempt makes progress.
+                    salvaged = salvage_truncated_write(raw_content)
+                    write_args = None
+                    if salvaged is not None and salvage_writes < 8:
+                        write_args = dict(salvaged.args)
+                        target = self._safe_project_file(
+                            str(write_args.get("path") or ""))
+                        existing = ""
+                        if target is not None and target.is_file():
+                            try:
+                                existing = target.read_text(
+                                    encoding="utf-8", errors="replace")
+                            except OSError:
+                                existing = ""
+                        if not write_args.get("append"):
+                            deduped = dedupe_salvaged_write(
+                                existing, str(write_args.get("content") or ""))
+                            if deduped is None:
+                                write_args = None  # nothing new arrived
+                            else:
+                                write_args["content"] = deduped[0]
+                                write_args["append"] = deduped[1]
+                    if write_args is not None:
+                        salvage_writes += 1
+                        self.emit(AgentEvent("tool_started", {
+                            "tool": "write_file", "args": {
+                                "path": write_args.get("path"),
+                                "salvaged": True}, "turn": turn}))
+                        result = self.belt.execute(
+                            "write_file", write_args, ctx)
+                        self.emit(AgentEvent("tool_result", {
+                            "tool": "write_file",
+                            "success": bool(result.get("success")),
+                            "summary": ("Salvaged partial write: "
+                                        + str(result.get("message")
+                                              or result.get("error") or "")),
+                            "turn": turn}))
+                        trajectory.record("truncated_salvage", {
+                            "path": write_args.get("path"),
+                            "chars": len(write_args.get("content") or ""),
+                            "append": bool(write_args.get("append"))})
+                        if result.get("success"):
+                            guardrails.note_mutation()
+                            made_tool_call = True
+                            # Progress was made — don't burn a retry.
+                            truncation_retries = 0
+                            content = str(write_args.get("content") or "")
+                            tail = content[-80:]
+                            conversation.add({"role": "user", "content":
+                                f"Your write_file call was cut off by the "
+                                f"output limit, but the content up to this "
+                                f"point WAS saved to "
+                                f"{write_args.get('path')}. Do NOT rewrite "
+                                f"it. Continue the file with write_file "
+                                f"append=true, starting exactly after this "
+                                f"text:\n...{tail}"})
+                            _persist("running", turn)
+                            continue
+                    if truncation_retries < 3:
+                        truncation_retries += 1
+                        trajectory.record("truncated_output",
+                                          {"retry": truncation_retries})
+                        conversation.add({"role": "user", "content":
+                            "Your last tool call was cut off by the output "
+                            "length limit — it was NOT executed. Do not retry "
+                            "it whole. Split the work into smaller calls: for "
+                            "a long file, call write_file with the first ~100 "
+                            "lines now, then keep calling write_file with "
+                            "append=true for each next part until done."})
+                        continue
+                    # Never dump the raw truncated payload as the answer.
+                    status = "error"
+                    final_text = (
+                        "The model kept exceeding its output limit mid tool "
+                        "call, so the run was stopped. Try again with a "
+                        "smaller request, or ask for the file to be written "
+                        "in parts.")
+                    break
+
+                if not turn_data.tool_calls:
+                    # A follow-up may have arrived while the model was
+                    # streaming its answer. Give it another turn instead of
+                    # completing before the new user direction is considered.
+                    if _apply_steering(turn):
+                        continue
+                    # Only nudge when the model printed code fences instead of
+                    # acting — that's the failure the nudge exists for. Plain
+                    # prose with no tool calls is a legitimate direct answer
+                    # (greetings, questions); forcing tools there makes the
+                    # agent invent work the user never asked for.
+                    printed_code_instead = "```" in turn_data.text
+                    if (not made_tool_call and printed_code_instead
+                            and nudges < MAX_NO_TOOL_NUDGES):
+                        nudges += 1
+                        trajectory.record("no_tool_nudge", {"nudge": nudges})
+                        conversation.add({"role": "user", "content": NO_TOOL_NUDGE})
+                        continue
+                    final_text = scrub_tool_markup(turn_data.text)
+                    status = "completed"
+                    break
+                made_tool_call = True
+
+                results: list[dict[str, Any]] = []
+                for call in turn_data.tool_calls:
+                    if self.cancel_token is not None:
+                        self.cancel_token.raise_if_cancelled()
+                    decision = guardrails.before_call(call.name, call.args)
+                    if not decision.allows_execution:
+                        blocked_total += 1
+                        result: dict[str, Any] = {
+                            "success": False, "error_code": decision.code,
+                            "error": decision.message}
+                    else:
+                        self.emit(AgentEvent("tool_started", {
+                            "tool": call.name, "args": call.args, "turn": turn}))
+                        result = self.belt.execute(call.name, call.args, ctx)
+                        spec = self.belt.get(call.name)
+                        if (result.get("success") and spec is not None
+                                and spec.mutating):
+                            # The world changed; previously failing commands
+                            # (e.g. the failing test being fixed) may pass now.
+                            guardrails.note_mutation()
+                        after = guardrails.after_call(call.name, call.args, result)
+                        if after.action == "block":
+                            blocked_total += 1
+                            result = {**result, "guardrail": after.message}
+                        elif after.action == "warn":
+                            result = {**result, "guardrail": after.message}
+                    self.emit(AgentEvent("tool_result", {
+                        "tool": call.name, "success": bool(result.get("success")),
+                        "summary": str(result.get("message") or result.get("error") or "")[:200],
+                        "turn": turn}))
+                    trajectory.record("tool_call", {
+                        "tool": call.name, "args": call.args, "result": result})
+                    results.append(result)
+
+                for result_message in self.adapter.tool_result_messages(
+                        list(turn_data.tool_calls), results):
+                    conversation.add(result_message)
+                _persist("running", turn)
+
+                # Planning tools intentionally pause the agent after they
+                # publish a question set, reviewable plan, or material
+                # amendment.  A second model turn here would duplicate the
+                # artifact or continue past the approval boundary.
+                if any(bool(result.get("stop")) for result in results):
+                    status = "completed"
+                    final_text = str(next((
+                        result.get("message") for result in reversed(results)
+                        if result.get("message")), "Plan state updated"))
+                    break
+
+                if blocked_total >= MAX_GUARDRAIL_BLOCKS:
+                    status = "stalled"
+                    final_text = ("Run stopped: the agent repeated unproductive "
+                                  "tool calls too many times.")
+                    break
+
+            # A bounded run may spend its final operational turn on a useful
+            # tool call and never get the chance to explain what it learned.
+            # Give it one tool-free synthesis call so callers (especially mesh
+            # handoffs) receive grounded context instead of an empty string.
+            if status == "max_turns":
+                conversation.add({
+                    "role": "user",
+                    "content": (
+                        "The operational turn budget is exhausted. Do not call "
+                        "tools. Give a concise, factual handoff now: progress, "
+                        "files inspected or changed, verification performed, "
+                        "and the exact unfinished work. Never claim completion "
+                        "unless the tool results prove it."),
+                })
+                conversation.force_fit()
+                try:
+                    message = self.model.complete(
+                        conversation.payload_messages(),
+                        extras={"max_tokens": min(1200, self.reserve_output),
+                                "temperature": 0.1},
+                        on_delta=None,
+                    )
+                    candidate = scrub_tool_markup(
+                        str(message.get("content") or "")).strip()
+                    if candidate:
+                        final_text = candidate
+                except Exception:
+                    logger.debug("Turn-limit synthesis failed", exc_info=True)
+                if not final_text:
+                    changed = ", ".join(sorted(ctx.mutated_files))
+                    final_text = (
+                        f"Turn limit reached after {turns_used} turns."
+                        + (f" Files changed: {changed}." if changed else "")
+                        + " The agent did not produce a final handoff.")
+        except AgentCancelledError:
+            status = "cancelled"
+            final_text = "Run cancelled by user."
+        except Exception as exc:
+            logger.exception("Agent run failed")
+            status = "error"
+            final_text = f"Run failed: {exc}"
+            self.emit(AgentEvent("run_error", {"run_id": run_id, "error": str(exc)}))
+
+        result = {
+            "success": status == "completed",
+            "status": status,
+            "final_text": final_text,
+            "run_id": run_id,
+            "checkpoint_id": ctx.checkpoint_id,
+            "mutated_files": sorted(ctx.mutated_files),
+            "todos": ctx.todos,
+            "turns": turns_used,
+        }
+        _persist(status, turns_used)
+        trajectory.finish(status=status, result={
+            "final_text": final_text, "mutated_files": result["mutated_files"]})
+        self.emit(AgentEvent("run_completed", result))
+        return result

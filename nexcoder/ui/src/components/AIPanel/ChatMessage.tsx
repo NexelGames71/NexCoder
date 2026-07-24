@@ -6,14 +6,17 @@ import { useChatStore } from '../../store/useChatStore';
 import { agentApprovePatchset, agentRejectDiff, readFile } from '../../services/bridge';
 import AgentTurnPanel from './AgentTurnPanel';
 import FinalAnswerCard from './FinalAnswerCard';
+import { sanitizeAssistantText } from './assistantText';
 import {
   Check, ChevronDown, ChevronRight, FileCode2, FileText, FolderMinus, FolderPlus,
   ImageIcon, MoveRight, RotateCcw, Timer
 } from 'lucide-react';
+import UserPromptCard from './UserPromptCard';
 
 interface ChatMessageProps {
   message: MessageType;
   isLatest?: boolean;
+  onEdit?: (message: MessageType) => void;
 }
 
 function getLanguageFromExtension(path: string): string {
@@ -223,16 +226,14 @@ function DiffsCard({ diffs, onReview, taskId }: { diffs: DiffHunk[]; onReview: (
 }
 
 function stripToolCalls(text: string) {
-  return text
-    .replace(/<tool_call\s+name="[^"]+">[\s\S]*?<\/tool_call>/g, '')
-    .trim();
+  return sanitizeAssistantText(text);
 }
 
 function normalizeText(text: string) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-export default function ChatMessage({ message, isLatest = false }: ChatMessageProps) {
+export default function ChatMessage({ message, isLatest = false, onEdit }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const { pendingDiffs, tasks, scanStepsByTask, setActiveDiffId } = useChatStore();
 
@@ -250,9 +251,11 @@ export default function ChatMessage({ message, isLatest = false }: ChatMessagePr
   if (isUser) {
     return (
       <div className="chat-turn chat-turn-user">
-        <div className="chat-bubble chat-bubble-user">
-          {message.content}
-        </div>
+        <UserPromptCard
+          text={message.content}
+          attachments={message.attachments}
+          onEdit={!message.isSteering && onEdit ? () => onEdit(message) : undefined}
+        />
       </div>
     );
   }

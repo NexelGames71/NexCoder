@@ -39,6 +39,10 @@ class ToolGuardrailConfig:
     no_progress_block_after: int = 3
     idempotent_tools: frozenset[str] = field(default_factory=lambda: IDEMPOTENT_TOOLS)
     mutating_tools: frozenset[str] = field(default_factory=lambda: MUTATING_TOOLS)
+    # Tools whose exact repeats are legitimate because the world changes
+    # between calls (e.g. re-running tests after a fix). They skip the
+    # repeated-exact-call block but keep failure tracking.
+    exempt_repeat_tools: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -65,9 +69,38 @@ class ToolGuardrailController:
         self._same_tool_failures: dict[str, int] = {}
         self._idempotent_results: dict[str, tuple[str, int]] = {}
 
+    def note_context_compacted(self) -> None:
+        """Old tool results were compacted out of the model's context, so
+        'use the previous result' is no longer possible: allow re-reads."""
+        self._seen_calls.clear()
+        self._idempotent_results.clear()
+
+    def note_mutation(self) -> None:
+        """A mutating tool succeeded: the world changed, so commands that
+        failed before may legitimately pass now. Reset failure tracking."""
+        self._failure_counts.clear()
+        self._same_tool_failures.clear()
+
     def before_call(self, tool: str, args: Mapping[str, Any] | None) -> ToolGuardrailDecision:
         signature = tool_signature(tool, args or {})
         seen = self._seen_calls.get(signature, 0)
+        if tool in self.config.exempt_repeat_tools:
+            # Re-running a previously *successful* command is the legitimate
+            # verify -> fix -> re-verify loop. Re-running one that already
+            # failed, unchanged, is never productive.
+            if self._failure_counts.get(signature, 0) > 0:
+                return ToolGuardrailDecision(
+                    action="block",
+                    code="repeat_failed_command",
+                    message=(
+                        "This exact command already failed. Change the command "
+                        "(fix quoting, paths, or arguments) instead of retrying it."),
+                    tool=tool,
+                    count=self._failure_counts[signature],
+                    signature=signature,
+                )
+            self._seen_calls[signature] = seen + 1
+            return ToolGuardrailDecision(tool=tool, count=seen + 1, signature=signature)
         if seen >= self.config.repeated_exact_block_after:
             return ToolGuardrailDecision(
                 action="block",

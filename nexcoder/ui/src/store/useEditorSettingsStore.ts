@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { EditorTheme } from '../services/theme';
 
 /**
  * Editor *settings* — what the user sees and types in the editor
@@ -12,7 +13,7 @@ import { create } from 'zustand';
  * in the TopBar.
  */
 export interface EditorSettings {
-  theme: string;
+  theme: EditorTheme;
   fontSize: number;
   wordWrap: 'on' | 'off';
   minimap: boolean;
@@ -21,6 +22,28 @@ export interface EditorSettings {
   formatOnSave: boolean;
   lineNumbers: 'on' | 'off' | 'relative';
   defaultSplitDirection: 'horizontal' | 'vertical';
+  /** Write changes to disk automatically ~1s after typing stops. */
+  autoSave: boolean;
+  bracketPairColorization: boolean;
+  stickyScroll: boolean;
+  // Appearance
+  fontFamily: string;            // '' = theme default
+  uiScale: number;               // percent, 100 = default
+  sidebarPosition: 'left' | 'right';
+  aiPanelPosition: 'right' | 'left';
+  // Editor extras
+  codeFolding: boolean;
+  bracketMatching: boolean;
+  // Files
+  restoreOpenFiles: boolean;
+  confirmFileDelete: boolean;
+  // Terminal
+  terminalFontSize: number;
+  terminalScrollback: number;
+  // Language intelligence
+  lspEnabled: boolean;
+  lspDiagnostics: boolean;
+  lspAutocomplete: boolean;
 }
 
 interface EditorSettingsState {
@@ -31,7 +54,7 @@ interface EditorSettingsState {
 const STORAGE_KEY = 'nexcoder_editor_settings';
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  theme: 'vs-dark',
+  theme: 'nexcoder',
   fontSize: 14,
   wordWrap: 'on',
   minimap: false,
@@ -40,6 +63,22 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   formatOnSave: false,
   lineNumbers: 'on',
   defaultSplitDirection: 'horizontal',
+  autoSave: false,
+  bracketPairColorization: true,
+  stickyScroll: false,
+  fontFamily: '',
+  uiScale: 100,
+  sidebarPosition: 'left',
+  aiPanelPosition: 'right',
+  codeFolding: true,
+  bracketMatching: true,
+  restoreOpenFiles: true,
+  confirmFileDelete: true,
+  terminalFontSize: 13,
+  terminalScrollback: 5000,
+  lspEnabled: true,
+  lspDiagnostics: true,
+  lspAutocomplete: true,
 };
 
 export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({
@@ -47,7 +86,9 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) };
+        const loaded = { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+        return loaded;
       }
       // One-time migration: pull editor fields out of the legacy
       // ``nexcoder_settings`` blob. Existing users keep their
@@ -61,8 +102,11 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({
             (migrated as Record<string, unknown>)[key] = parsed[key];
           }
         }
-        return { ...DEFAULT_EDITOR_SETTINGS, ...migrated };
+        const loaded = { ...DEFAULT_EDITOR_SETTINGS, ...migrated };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+        return loaded;
       }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_EDITOR_SETTINGS));
       return DEFAULT_EDITOR_SETTINGS;
     } catch {
       return DEFAULT_EDITOR_SETTINGS;

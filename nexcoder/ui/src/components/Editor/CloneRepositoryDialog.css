@@ -1,0 +1,133 @@
+.clone-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 3, 8, 0.68);
+  backdrop-filter: blur(6px);
+}
+
+.clone-dialog {
+  width: min(520px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.clone-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clone-dialog-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.clone-dialog-header svg {
+  color: var(--accent-purple);
+}
+
+.clone-dialog-header button,
+.clone-destination-row button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.clone-dialog-header button:hover,
+.clone-destination-row button:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.clone-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clone-field span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.clone-field input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  outline: none;
+}
+
+.clone-field input:focus {
+  border-color: var(--accent-purple);
+}
+
+.clone-destination-row {
+  display: flex;
+  gap: 6px;
+}
+
+.clone-destination-row input {
+  flex: 1;
+}
+
+.clone-error,
+.clone-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+.clone-error {
+  border: 1px solid rgba(240, 106, 106, 0.35);
+  background: rgba(240, 106, 106, 0.1);
+  color: var(--accent-red);
+}
+
+.clone-status {
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  color: var(--text-secondary);
+}
+
+.clone-status svg {
+  animation: terminal-spin 900ms linear infinite;
+  color: var(--accent-purple);
+}
+
+.clone-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

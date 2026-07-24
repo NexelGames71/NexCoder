@@ -1,18 +1,44 @@
-import React, { useState } from 'react';
-import { Files, Search, GitBranch, Play, MessageSquareText } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Files, Search, GitBranch, ListChecks, Network, Puzzle } from 'lucide-react';
 import FileExplorer from './FileExplorer';
 import SearchPanel from './SearchPanel';
 import GitPanel from './GitPanel';
 import TasksPanel from './TasksPanel';
-import ChatHistoryPanel from './ChatHistoryPanel';
+import MeshPanel from './MeshPanel';
+import ExtensionsPanel from './ExtensionsPanel';
 import './Sidebar.css';
 
 interface SidebarProps {
   isCollapsed: boolean;
 }
 
+type TabId = 'explorer' | 'search' | 'git' | 'extensions' | 'tasks' | 'mesh';
+
+// Activity bar order: Explorer, Search, Source Control, Extensions,
+// Agent Tasks, Agent Mesh. Chat history lives in the AI panel.
+const TABS: { id: TabId; icon: any; title: string }[] = [
+  { id: 'explorer', icon: Files, title: 'Explorer' },
+  { id: 'search', icon: Search, title: 'Search' },
+  { id: 'git', icon: GitBranch, title: 'Source Control' },
+  { id: 'extensions', icon: Puzzle, title: 'Extensions' },
+  { id: 'tasks', icon: ListChecks, title: 'Agent Tasks' },
+  { id: 'mesh', icon: Network, title: 'Agent Mesh' },
+];
+
 export default function Sidebar({ isCollapsed }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<'explorer' | 'search' | 'git' | 'tasks' | 'chats'>('explorer');
+  const [activeTab, setActiveTab] = useState<TabId>('explorer');
+
+  useEffect(() => {
+    const validTabs = new Set(TABS.map((tab) => tab.id));
+    const handleShowTab = (event: Event) => {
+      const tabId = String((event as CustomEvent<{ tabId?: string }>).detail?.tabId || 'explorer');
+      if (validTabs.has(tabId as TabId)) {
+        setActiveTab(tabId as TabId);
+      }
+    };
+    window.addEventListener('nexcoder:show-sidebar-tab', handleShowTab);
+    return () => window.removeEventListener('nexcoder:show-sidebar-tab', handleShowTab);
+  }, []);
 
   if (isCollapsed) return null;
 
@@ -24,10 +50,12 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
         return <SearchPanel />;
       case 'git':
         return <GitPanel />;
+      case 'extensions':
+        return <ExtensionsPanel />;
       case 'tasks':
         return <TasksPanel />;
-      case 'chats':
-        return <ChatHistoryPanel />;
+      case 'mesh':
+        return <MeshPanel />;
       default:
         return <FileExplorer />;
     }
@@ -35,38 +63,18 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
 
   return (
     <div className="sidebar-container h-full">
-      {/* Sidebar Icon Tabs */}
+      {/* Activity bar */}
       <div className="sidebar-tabs">
-        <button
-          className={`sidebar-tab-btn ${activeTab === 'explorer' ? 'active' : ''}`}
-          onClick={() => setActiveTab('explorer')}
-        >
-          <Files size={18} />
-        </button>
-        <button
-          className={`sidebar-tab-btn ${activeTab === 'search' ? 'active' : ''}`}
-          onClick={() => setActiveTab('search')}
-        >
-          <Search size={18} />
-        </button>
-        <button
-          className={`sidebar-tab-btn ${activeTab === 'git' ? 'active' : ''}`}
-          onClick={() => setActiveTab('git')}
-        >
-          <GitBranch size={18} />
-        </button>
-        <button
-          className={`sidebar-tab-btn ${activeTab === 'tasks' ? 'active' : ''}`}
-          onClick={() => setActiveTab('tasks')}
-        >
-          <Play size={18} />
-        </button>
-        <button
-          className={`sidebar-tab-btn ${activeTab === 'chats' ? 'active' : ''}`}
-          onClick={() => setActiveTab('chats')}
-        >
-          <MessageSquareText size={18} />
-        </button>
+        {TABS.map(({ id, icon: Icon, title }) => (
+          <button
+            key={id}
+            className={`sidebar-tab-btn ${activeTab === id ? 'active' : ''}`}
+            onClick={() => setActiveTab(id)}
+            title={title}
+          >
+            <Icon size={18} />
+          </button>
+        ))}
       </div>
 
       {/* Active panel content */}

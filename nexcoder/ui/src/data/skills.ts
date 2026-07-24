@@ -13,6 +13,8 @@ import {
   Bot,
   Bug,
   ShieldCheck,
+  ClipboardList,
+  SquareTerminal,
   Radar,
   Layout,
   FlaskConical,
@@ -47,7 +49,7 @@ import type { Skill, SkillCategory } from './skills-types';
 
 import { GENERATED_SKILLS, GENERATED_CATEGORIES } from '../generated/skills';
 
-export type ModeId = 'ask' | 'edit' | 'agent' | 'debug' | 'review';
+export type ModeId = 'ask' | 'plan' | 'edit' | 'agent' | 'debug' | 'review' | 'terminal';
 
 export interface ModeEntry {
   id: ModeId;
@@ -66,6 +68,14 @@ export const MODES: ModeEntry[] = [
     description: 'Read-only Q&A — agent inspects files to answer your question.',
     color: 'var(--accent-purple)',
     shortcut: '/ask',
+  },
+  {
+    id: 'plan',
+    label: 'Plan',
+    icon: ClipboardList,
+    description: 'Grounded implementation plan — explores code, changes nothing.',
+    color: 'var(--accent-yellow, #facc15)',
+    shortcut: '/plan',
   },
   {
     id: 'edit',
@@ -99,6 +109,14 @@ export const MODES: ModeEntry[] = [
     color: 'var(--accent-cyan, #22d3ee)',
     shortcut: '/review',
   },
+  {
+    id: 'terminal',
+    label: 'Terminal',
+    icon: SquareTerminal,
+    description: 'Command-line tasks — builds, tooling, git, environment.',
+    color: 'var(--accent-pink, #f472b6)',
+    shortcut: '/terminal',
+  },
 ];
 
 // lucide-react icon registry. The backend returns icon *names* as
@@ -109,6 +127,8 @@ export const ICON_REGISTRY: Record<string, LucideIcon> = {
   Bot,
   Bug,
   ShieldCheck,
+  ClipboardList,
+  SquareTerminal,
   Radar,
   Layout,
   FlaskConical,

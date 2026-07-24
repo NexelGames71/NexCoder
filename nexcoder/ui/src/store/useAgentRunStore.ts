@@ -1,0 +1,249 @@
+import { create } from 'zustand';
+import { PromptAttachment } from '../types';
+
+export interface AgentTodo { id: number; content: string; status: 'pending' | 'in_progress' | 'completed'; }
+export interface PermissionReq { id: string; tool: string; command: string; }
+export interface AgentEventMsg { type: string; payload: Record<string, any>; ts?: number; }
+
+// Ordered transcript, Codex-style: prose and tool actions interleave in
+// the order they happened instead of living in separate buckets.
+export type TranscriptItem =
+  | { kind: 'text'; text: string }
+  | { kind: 'notice'; text: string }
+  | { kind: 'steer'; id: string; text: string; attachments: PromptAttachment[] }
+  | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean;
+      success?: boolean; summary?: string;
+      output?: string[];   // streamed command output lines
+      diff?: string;       // unified diff for file edits
+      added?: number;      // diff line counts, shown live as +N −M
+      removed?: number;
+      streamingChars?: number }; // live byte count while the call generates
+
+export interface ContextUsage { tokens: number; budget: number; percent: number; }
+
+const MAX_OUTPUT_LINES = 500;
+
+export interface AgentRun {
+  runActive: boolean;
+  transcript: TranscriptItem[];
+  todos: AgentTodo[];
+  permission: PermissionReq | null;
+  checkpointId: string | null;
+  mutatedFiles: string[];
+  finalText: string;
+  status: string;
+  contextUsage: ContextUsage | null;
+}
+
+const emptyRun = (): AgentRun => ({
+  runActive: true, transcript: [], todos: [], permission: null,
+  checkpointId: null, mutatedFiles: [], finalText: '', status: 'running',
+  contextUsage: null,
+});
+
+interface AgentRunState {
+  // One run per user message id; old runs stay visible in the chat flow.
+  runs: Record<string, AgentRun>;
+  activeRunId: string | null;
+  // Latest usage across runs — feeds the persistent composer meter.
+  lastContextUsage: ContextUsage | null;
+  start: (runId: string) => void;
+  addSteeringPrompt: (runId: string, prompt: {
+    id: string; text: string; attachments: PromptAttachment[];
+  }) => void;
+  removeRuns: (runIds: string[]) => void;
+  handleEvent: (event: AgentEventMsg) => void;
+  reset: () => void;
+}
+
+function applyEvent(run: AgentRun, event: AgentEventMsg): AgentRun {
+  const { type, payload } = event;
+  switch (type) {
+    case 'run_started': return { ...run, runActive: true, status: 'running' };
+    case 'text_delta': {
+      const transcript = [...run.transcript];
+      const last = transcript[transcript.length - 1];
+      if (last && last.kind === 'text') {
+        transcript[transcript.length - 1] = { kind: 'text', text: last.text + (payload.text ?? '') };
+      } else {
+        transcript.push({ kind: 'text', text: payload.text ?? '' });
+      }
+      return { ...run, transcript };
+    }
+    case 'tool_streaming': {
+      // Fires while a tool call is still generating (before tool_started).
+      // Maintain a single trailing placeholder so a long write shows a
+      // live, rising byte count instead of silence.
+      const transcript = [...run.transcript];
+      const last = transcript[transcript.length - 1];
+      const path = payload.path ? { path: payload.path } : undefined;
+      if (last && last.kind === 'step' && !last.done
+          && last.streamingChars !== undefined) {
+        transcript[transcript.length - 1] = {
+          ...last,
+          tool: payload.tool || last.tool,
+          args: path ?? last.args,
+          streamingChars: payload.chars ?? last.streamingChars,
+        };
+      } else {
+        transcript.push({
+          kind: 'step', tool: payload.tool || 'write_file', args: path,
+          done: false, streamingChars: payload.chars ?? 0,
+        });
+      }
+      return { ...run, transcript };
+    }
+    case 'tool_started': {
+      // Adopt a trailing streaming placeholder if present, else append.
+      const transcript = [...run.transcript];
+      const last = transcript[transcript.length - 1];
+      if (last && last.kind === 'step' && !last.done
+          && last.streamingChars !== undefined) {
+        transcript[transcript.length - 1] = {
+          kind: 'step', tool: payload.tool, args: payload.args, done: false,
+        };
+        return { ...run, transcript };
+      }
+      return { ...run, transcript: [...transcript,
+               { kind: 'step', tool: payload.tool, args: payload.args, done: false }] };
+    }
+    case 'tool_result': {
+      const transcript = [...run.transcript];
+      for (let i = transcript.length - 1; i >= 0; i--) {
+        const item = transcript[i];
+        if (item.kind === 'step' && !item.done && item.tool === payload.tool) {
+          transcript[i] = { ...item, done: true, success: payload.success, summary: payload.summary };
+          break;
+        }
+      }
+      return { ...run, transcript };
+    }
+    case 'command_output': {
+      const transcript = [...run.transcript];
+      for (let i = transcript.length - 1; i >= 0; i--) {
+        const item = transcript[i];
+        if (item.kind === 'step' && item.tool === 'run_command' && !item.done) {
+          const output = [...(item.output ?? [])];
+          if (output.length < MAX_OUTPUT_LINES) output.push(String(payload.line ?? ''));
+          transcript[i] = { ...item, output };
+          break;
+        }
+      }
+      return { ...run, transcript };
+    }
+    case 'todo_updated': return { ...run, todos: payload.todos ?? [] };
+    case 'context_usage':
+      return { ...run, contextUsage: {
+        tokens: payload.tokens ?? 0, budget: payload.budget ?? 0,
+        percent: payload.percent ?? 0 } };
+    case 'compaction': {
+      const before = payload.before, after = payload.after;
+      const text = (typeof before === 'number' && typeof after === 'number')
+        ? `Context compacted: ~${(before / 1000).toFixed(1)}k → ~${(after / 1000).toFixed(1)}k tokens`
+        : 'Context compacted to fit the model window';
+      return { ...run, transcript: [...run.transcript, { kind: 'notice', text }] };
+    }
+    case 'steering_applied': {
+      // The UI inserts the complete steering prompt (including image data)
+      // after the backend accepts it. This acknowledgement must not create a
+      // second, lossy "Steered: ..." transcript line.
+      return run;
+    }
+    case 'permission_request':
+      return { ...run, permission: { id: payload.id, tool: payload.tool, command: payload.command } };
+    case 'permission_resolved': return { ...run, permission: null };
+    case 'checkpoint_created': return { ...run, checkpointId: payload.checkpoint_id };
+    case 'edit_applied': {
+      const transcript = [...run.transcript];
+      for (let i = transcript.length - 1; i >= 0; i--) {
+        const item = transcript[i];
+        if (item.kind === 'step' && !item.done
+            && (item.tool === 'edit_file' || item.tool === 'write_file')) {
+          transcript[i] = {
+            ...item, diff: String(payload.diff ?? ''),
+            added: typeof payload.added === 'number' ? payload.added : undefined,
+            removed: typeof payload.removed === 'number' ? payload.removed : undefined,
+          };
+          break;
+        }
+      }
+      const mutatedFiles = run.mutatedFiles.includes(payload.path)
+        ? run.mutatedFiles : [...run.mutatedFiles, payload.path];
+      return { ...run, transcript, mutatedFiles };
+    }
+    case 'run_completed': {
+      const transcript = [...run.transcript];
+      const last = transcript[transcript.length - 1];
+      if (last && last.kind === 'text' && (payload.final_text ?? '').startsWith(last.text.slice(0, 40))) {
+        transcript.pop();
+      }
+      return {
+        ...run, runActive: false, status: payload.status,
+        finalText: payload.final_text ?? '', transcript,
+        checkpointId: payload.checkpoint_id ?? run.checkpointId,
+        mutatedFiles: payload.mutated_files ?? run.mutatedFiles,
+      };
+    }
+    case 'run_error':
+      return { ...run, runActive: false, status: 'error', finalText: payload.error ?? '' };
+    default: return run;
+  }
+}
+
+export const useAgentRunStore = create<AgentRunState>((set) => ({
+  runs: {},
+  activeRunId: null,
+  lastContextUsage: null,
+  start: (runId) => set((state) => ({
+    runs: { ...state.runs, [runId]: emptyRun() },
+    activeRunId: runId,
+  })),
+  addSteeringPrompt: (runId, prompt) => set((state) => {
+    const run = state.runs[runId];
+    if (!run || run.transcript.some((item) => item.kind === 'steer' && item.id === prompt.id)) {
+      return {};
+    }
+    return {
+      runs: {
+        ...state.runs,
+        [runId]: {
+          ...run,
+          transcript: [...run.transcript, {
+            kind: 'steer',
+            id: prompt.id,
+            text: prompt.text,
+            attachments: prompt.attachments,
+          }],
+        },
+      },
+    };
+  }),
+  removeRuns: (runIds) => set((state) => {
+    const removed = new Set(runIds);
+    const runs = Object.fromEntries(
+      Object.entries(state.runs).filter(([id]) => !removed.has(id)),
+    );
+    return {
+      runs,
+      activeRunId: state.activeRunId && removed.has(state.activeRunId)
+        ? null
+        : state.activeRunId,
+    };
+  }),
+  handleEvent: (event) => set((state) => {
+    const id = state.activeRunId;
+    if (!id || !state.runs[id]) return {};
+    const updated: Partial<AgentRunState> = {
+      runs: { ...state.runs, [id]: applyEvent(state.runs[id], event) },
+    };
+    if (event.type === 'context_usage') {
+      updated.lastContextUsage = {
+        tokens: event.payload.tokens ?? 0,
+        budget: event.payload.budget ?? 0,
+        percent: event.payload.percent ?? 0,
+      };
+    }
+    return updated;
+  }),
+  reset: () => set({ runs: {}, activeRunId: null, lastContextUsage: null }),
+}));

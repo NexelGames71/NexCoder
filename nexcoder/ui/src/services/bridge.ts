@@ -1,5 +1,5 @@
-/**
- * Bridge — TypeScript wrapper around the QWebChannel Python bridge.
+﻿/**
+ * Bridge â€” TypeScript wrapper around the QWebChannel Python bridge.
  * Provides typed async methods matching the Python Bridge class.
  */
 
@@ -12,7 +12,10 @@ declare global {
       toggleSidebar: () => void;
       toggleTerminal: () => void;
       toggleAIPanel: () => void;
-      newTerminal: () => void;
+      showAIPanel?: () => void;
+      showSidebarTab?: (tabId?: string) => void;
+      showBottomPanel?: (tabId?: string) => void;
+      newTerminal: (cwd?: string) => void;
       saveActiveFile: () => void;
       saveAllFiles: () => void;
       saveActiveFileAs: () => void;
@@ -22,33 +25,58 @@ declare global {
 
 let bridge: any = null;
 const pendingSignalListeners: Record<string, Function[]> = {};
+const bridgeReadyListeners: Array<(native: boolean) => void> = [];
 
 /**
  * Initialize the QWebChannel bridge to Python backend.
  */
 export async function initBridge(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof window.QWebChannel === 'undefined') {
-      // Development mode — no QWebChannel available
-      console.warn('[Bridge] QWebChannel not available, using mock bridge');
-      bridge = createMockBridge();
+  return new Promise((resolve) => {
+    let settled = false;
+    const installBridge = (nextBridge: any) => {
+      bridge = nextBridge;
       flushPendingSignalListeners();
+      const native = !nextBridge?.__mock;
+      bridgeReadyListeners.forEach((listener) => listener(native));
+    };
+    const finish = (nextBridge: any) => {
+      installBridge(nextBridge);
+      if (settled) return;
+      settled = true;
       resolve();
+    };
+    const timeout = window.setTimeout(() => {
+      console.warn('[Bridge] QWebChannel initialization timed out, rendering with mock bridge');
+      finish(createMockBridge());
+    }, 2000);
+
+    if (typeof window.QWebChannel === 'undefined' || !window.qt?.webChannelTransport) {
+      console.warn('[Bridge] QWebChannel not available, using mock bridge');
+      window.clearTimeout(timeout);
+      finish(createMockBridge());
       return;
     }
 
     try {
       new window.QWebChannel(window.qt.webChannelTransport, (channel: any) => {
-        bridge = channel.objects.bridge;
-        flushPendingSignalListeners();
+        window.clearTimeout(timeout);
+        const nativeBridge = channel?.objects?.bridge;
+        if (!nativeBridge) {
+          console.warn('[Bridge] QWebChannel connected without a bridge object, using mock bridge');
+          finish(createMockBridge());
+          return;
+        }
         console.log('[Bridge] Connected to Python backend');
-        resolve();
+        if (settled) {
+          installBridge(nativeBridge);
+          return;
+        }
+        finish(nativeBridge);
       });
     } catch (err) {
       console.error('[Bridge] Connection failed:', err);
-      bridge = createMockBridge();
-      flushPendingSignalListeners();
-      resolve();
+      window.clearTimeout(timeout);
+      finish(createMockBridge());
     }
   });
 }
@@ -60,19 +88,58 @@ export function getBridge(): any {
   return bridge;
 }
 
-// ── Typed API Methods ──────────────────────────────────────────────
+export function onBridgeReady(callback: (native: boolean) => void): () => void {
+  bridgeReadyListeners.push(callback);
+  if (bridge) {
+    queueMicrotask(() => callback(!bridge?.__mock));
+  }
+  return () => {
+    const index = bridgeReadyListeners.indexOf(callback);
+    if (index >= 0) {
+      bridgeReadyListeners.splice(index, 1);
+    }
+  };
+}
+
+// â”€â”€ Typed API Methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function openFolderDialog(): Promise<string> {
   if (!bridge) return '';
   return callBridge('open_folder_dialog');
 }
 
+export async function openFileDialog(): Promise<string> {
+  if (!bridge) return '';
+  return callBridge('open_file_dialog');
+}
+
+export async function selectFolderDialog(title = 'Select Folder'): Promise<string> {
+  if (!bridge) return '';
+  return callBridge('select_folder_dialog', title);
+}
+
 export async function openProject(path: string): Promise<any> {
   return callBridge('open_project', path);
 }
 
+export async function cloneRepository(
+  repositoryUrl: string,
+  destinationParent = '',
+  directoryName = '',
+): Promise<any> {
+  return callBridge('clone_repository', repositoryUrl, destinationParent, directoryName);
+}
+
 export async function readFile(path: string): Promise<any> {
   return callBridge('read_file', path);
+}
+
+export async function readFileBase64(path: string): Promise<any> {
+  return callBridge('read_file_base64', path);
+}
+
+export async function writeFileBase64(path: string, b64: string): Promise<any> {
+  return callBridge('write_file_base64', path, b64);
 }
 
 export async function writeFile(path: string, content: string): Promise<any> {
@@ -85,6 +152,10 @@ export async function saveFileAs(path: string, content: string): Promise<any> {
 
 export async function deleteFile(path: string): Promise<any> {
   return callBridge('delete_file', path);
+}
+
+export async function deleteArtifactFile(path: string): Promise<any> {
+  return callBridge('delete_artifact_file', path);
 }
 
 export async function renameFile(oldPath: string, newPath: string): Promise<any> {
@@ -107,21 +178,46 @@ export async function searchFiles(query: string, root?: string): Promise<any> {
   return callBridge('search_files', query, root || '');
 }
 
+// Desktop app state (stored in the user's NexCoder AppData folder)
+export async function getAppState(): Promise<any> {
+  return callBridge('app_state_get');
+}
+
+export async function updateAppState(patch: Record<string, unknown>): Promise<any> {
+  return callBridge('app_state_update', JSON.stringify(patch));
+}
+
+export async function getWebAuthSessionStatus(): Promise<any> {
+  return callBridge('web_auth_session_status');
+}
+
+export async function clearWebAuthSession(): Promise<any> {
+  return callBridge('web_auth_clear');
+}
+
+export async function setAppShellStage(stage: 'auth' | 'ide'): Promise<any> {
+  return callBridge('app_shell_set_stage', stage);
+}
+
 // Terminal
 export async function spawnTerminal(cwd?: string): Promise<any> {
   return callBridge('spawn_terminal', cwd || '');
 }
 
-export function writeTerminal(sessionId: string, data: string): void {
-  if (bridge) bridge.write_terminal(sessionId, data);
+export async function getTerminalSnapshot(sessionId: string): Promise<any> {
+  return callBridge('terminal_snapshot', sessionId);
 }
 
-export function resizeTerminal(sessionId: string, cols: number, rows: number): void {
-  if (bridge) bridge.resize_terminal(sessionId, cols, rows);
+export async function writeTerminal(sessionId: string, data: string): Promise<any> {
+  return callBridge('write_terminal', sessionId, data);
 }
 
-export function killTerminal(sessionId: string): void {
-  if (bridge) bridge.kill_terminal(sessionId);
+export async function resizeTerminal(sessionId: string, cols: number, rows: number): Promise<any> {
+  return callBridge('resize_terminal', sessionId, cols, rows);
+}
+
+export async function killTerminal(sessionId: string): Promise<any> {
+  return callBridge('kill_terminal', sessionId);
 }
 
 // Git
@@ -149,29 +245,168 @@ export async function gitLog(root?: string, count?: number): Promise<any> {
   return callBridge('git_log', root || '', count || 20);
 }
 
-// Agent / AI
-export async function agentAsk(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_ask', prompt, JSON.stringify(context));
+// Agent v2 (agentic core engine â€” every AI mode)
+export async function agentRunV2(
+  prompt: string, skillId = '', mode = 'agent', contextJson = '',
+): Promise<any> {
+  return callBridge('agent_run_v2', prompt, skillId, mode, contextJson);
 }
 
-export async function agentEdit(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_edit', prompt, JSON.stringify(context));
+export async function agentPermissionResponse(requestId: string, decision: 'allow' | 'allow_always' | 'deny'): Promise<any> {
+  return callBridge('agent_permission_response', requestId, decision);
 }
 
-export async function agentRun(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_run', prompt, JSON.stringify(context));
+export async function agentCancelV2(): Promise<any> {
+  return callBridge('agent_cancel_v2');
 }
 
-export async function agentScan(context: any): Promise<any> {
-  return callBridge('agent_scan', JSON.stringify(context));
+export async function agentSteerV2(
+  prompt: string, attachments: any[] = [], clientPromptId = '',
+): Promise<any> {
+  return callBridge('agent_steer_v2', prompt, JSON.stringify(attachments), clientPromptId);
 }
 
-export async function agentDebug(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_debug', prompt, JSON.stringify(context));
+export async function agentRevertRun(checkpointId: string): Promise<any> {
+  return callBridge('agent_revert_run', checkpointId);
 }
 
-export async function agentReview(prompt: string, context: any): Promise<any> {
-  return callBridge('agent_review', prompt, JSON.stringify(context));
+export async function agentRevertFile(checkpointId: string, path: string): Promise<any> {
+  return callBridge('agent_revert_file', checkpointId, path);
+}
+
+export async function agentRewindToPrompt(
+  sessionId: string,
+  target: { client_prompt_id: string; content: string; user_ordinal: number },
+): Promise<any> {
+  return callBridge('agent_rewind_to_prompt', sessionId, JSON.stringify(target));
+}
+
+// Persistent implementation plans
+export async function getPlan(planId: string): Promise<any> {
+  return callBridge('plan_get', planId);
+}
+
+export async function listPlans(conversationId = ''): Promise<any> {
+  return callBridge('plan_list', conversationId);
+}
+
+export async function answerPlanQuestions(
+  planId: string, revision: number, answers: Record<string, unknown>,
+): Promise<any> {
+  return callBridge('plan_answer', planId, revision, JSON.stringify(answers));
+}
+
+export async function requestPlanRevision(
+  planId: string, revision: number, review: string,
+): Promise<any> {
+  return callBridge('plan_request_revision', planId, revision, review);
+}
+
+export async function approvePlanAndExecute(planId: string, revision: number): Promise<any> {
+  return callBridge('plan_approve_and_execute', planId, revision);
+}
+
+export async function cancelPlan(planId: string): Promise<any> {
+  return callBridge('plan_cancel', planId);
+}
+
+export async function savePlanMarkdown(planId: string, suggestedPath = ''): Promise<any> {
+  return callBridge('plan_save_markdown', planId, suggestedPath);
+}
+
+export function onPlanUpdated(callback: (planJson: string) => void): void {
+  connectSignal('plan_updated', callback);
+}
+
+// Engine settings / permissions / project memory (settings surface)
+export async function getEngineSettings(): Promise<any> {
+  return callBridge('agent_get_engine_settings');
+}
+
+export async function updateEngineSettings(settings: {
+  context_window?: number; adapter?: string; full_auto?: boolean;
+  autonomy?: string; max_output_tokens?: number; temperature?: number;
+  max_turns?: number; disabled_tools?: string[]; memory_enabled?: boolean;
+  cmd_build?: string; cmd_test?: string; cmd_lint?: string;
+}): Promise<any> {
+  return callBridge('agent_update_engine_settings', JSON.stringify(settings));
+}
+
+export async function listAgentPermissions(): Promise<any> {
+  return callBridge('agent_permissions_list');
+}
+
+export async function removeAgentPermission(command: string): Promise<any> {
+  return callBridge('agent_permissions_remove', command);
+}
+
+export async function getProjectMemory(): Promise<any> {
+  return callBridge('agent_memory_get');
+}
+
+// LSP (language intelligence)
+export async function lspDidOpen(path: string, language: string, text: string): Promise<any> {
+  return callBridge('lsp_did_open', path, language, text);
+}
+
+export async function lspDidChange(path: string, text: string): Promise<any> {
+  return callBridge('lsp_did_change', path, text);
+}
+
+export async function lspDidClose(path: string): Promise<any> {
+  return callBridge('lsp_did_close', path);
+}
+
+export async function lspRequestRaw(
+  requestId: string, kind: string, path: string,
+  line: number, character: number, extra = '',
+): Promise<any> {
+  return callBridge('lsp_request', requestId, kind, path, line, character, extra);
+}
+
+export async function lspStatus(): Promise<any> {
+  return callBridge('lsp_status');
+}
+
+export async function testModelConnection(): Promise<any> {
+  return callBridge('test_model_connection');
+}
+
+export async function getActiveRules(): Promise<any> {
+  return callBridge('agent_get_active_rules');
+}
+
+export function onLspResponse(callback: (json: string) => void): void {
+  connectSignal('lsp_response', callback);
+}
+
+export function onLspDiagnostics(callback: (json: string) => void): void {
+  connectSignal('lsp_diagnostics', callback);
+}
+
+export async function saveProjectMemory(content: string): Promise<any> {
+  return callBridge('agent_memory_save', content);
+}
+
+export function onAgentEvent(callback: (eventJson: string) => void): void {
+  connectSignal('agent_event', callback);
+}
+
+// Agent Mesh (orchestrator + specialist agents)
+export async function meshRun(goal: string): Promise<any> {
+  return callBridge('mesh_run', goal);
+}
+
+export async function meshCancel(): Promise<any> {
+  return callBridge('mesh_cancel');
+}
+
+export async function meshList(): Promise<any> {
+  return callBridge('mesh_list');
+}
+
+export function onMeshEvent(callback: (eventJson: string) => void): void {
+  connectSignal('mesh_event', callback);
 }
 
 export async function agentApproveDiff(diffId: string): Promise<any> {
@@ -248,6 +483,14 @@ export async function appwriteLogout(): Promise<any> {
   return callBridge('appwrite_logout');
 }
 
+export async function startWebAuthLogin(): Promise<any> {
+  return callBridge('web_auth_start');
+}
+
+export function onWebAuthCompleted(callback: (eventJson: string) => void): () => void {
+  return connectSignal('web_auth_completed', callback);
+}
+
 export async function saveToAppwrite(collection: string, data: any): Promise<any> {
   return callBridge('save_to_appwrite', collection, JSON.stringify(data));
 }
@@ -256,14 +499,18 @@ export async function getRecentProjects(): Promise<any> {
   return callBridge('get_recent_projects');
 }
 
-// ── Signal Listeners ───────────────────────────────────────────────
+// â”€â”€ Signal Listeners â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export function onTerminalOutput(callback: (sessionId: string, data: string) => void): void {
-  connectSignal('terminal_output', callback);
+export function onTerminalOutput(
+  callback: (sessionId: string, data: string, sequence: number) => void,
+): () => void {
+  return connectSignal('terminal_output', callback);
 }
 
-export function onTerminalExited(callback: (sessionId: string, exitCode: number) => void): void {
-  connectSignal('terminal_exited', callback);
+export function onTerminalExited(
+  callback: (sessionId: string, exitCode: number) => void,
+): () => void {
+  return connectSignal('terminal_exited', callback);
 }
 
 export function onAgentStream(callback: (chunk: string) => void): void {
@@ -290,11 +537,15 @@ export function onProjectOpened(callback: (info: string) => void): void {
   connectSignal('project_opened', callback);
 }
 
+export function onCloneCompleted(callback: (info: string) => void): () => void {
+  return connectSignal('clone_completed', callback);
+}
+
 export function onGitUpdated(callback: (status: string) => void): void {
   connectSignal('git_updated', callback);
 }
 
-// ── Helpers ────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function callBridge(method: string, ...args: any[]): Promise<any> {
   if (!bridge || !bridge[method]) {
@@ -323,15 +574,31 @@ async function callBridge(method: string, ...args: any[]): Promise<any> {
   }
 }
 
-function connectSignal(signalName: string, callback: Function): void {
+function connectSignal(signalName: string, callback: Function): () => void {
   const signal = bridge?.[signalName];
   if (signal && typeof signal.connect === 'function') {
     signal.connect(callback);
-    return;
+  } else {
+    pendingSignalListeners[signalName] = pendingSignalListeners[signalName] || [];
+    if (!pendingSignalListeners[signalName].includes(callback)) {
+      pendingSignalListeners[signalName].push(callback);
+    }
   }
 
-  pendingSignalListeners[signalName] = pendingSignalListeners[signalName] || [];
-  pendingSignalListeners[signalName].push(callback);
+  return () => {
+    const callbacks = pendingSignalListeners[signalName];
+    if (callbacks) {
+      pendingSignalListeners[signalName] = callbacks.filter((item) => item !== callback);
+    }
+    const currentSignal = bridge?.[signalName];
+    if (currentSignal && typeof currentSignal.disconnect === 'function') {
+      try {
+        currentSignal.disconnect(callback);
+      } catch {
+        // QWebChannel may already have disconnected during application teardown.
+      }
+    }
+  };
 }
 
 function flushPendingSignalListeners(): void {
@@ -349,7 +616,7 @@ function flushPendingSignalListeners(): void {
  * Create a mock bridge for development mode (no QWebChannel).
  */
 function createMockBridge(): any {
-  return new Proxy({}, {
+  return new Proxy({ __mock: true }, {
     get(target, prop) {
       if (typeof prop === 'string') {
         return (...args: any[]) => {
@@ -361,3 +628,4 @@ function createMockBridge(): any {
     },
   });
 }
+

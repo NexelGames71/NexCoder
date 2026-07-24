@@ -9,9 +9,30 @@ import { EditorGroup, OpenFile } from '../types';
  * re-renders cheap and stops a font-size tweak from invalidating
  * the whole editor surface.
  */
+/** The user's current text selection in the editor — auto-attached to
+ *  AI runs so "fix this" refers to the selected code. */
+export interface EditorSelection {
+  path: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+}
+
+/** A jump target consumed by the editor after a file opens (used by
+ *  go-to-definition and the Problems panel). */
+export interface PendingReveal {
+  path: string;
+  line: number;
+  column: number;
+}
+
 interface EditorState {
   editorGroups: EditorGroup[];
   activeGroupId: string;
+  activeSelection: EditorSelection | null;
+  setActiveSelection: (selection: EditorSelection | null) => void;
+  pendingReveal: PendingReveal | null;
+  setPendingReveal: (reveal: PendingReveal | null) => void;
 
   openFile: (file: OpenFile, groupId?: string) => void;
   setActiveGroup: (id: string) => void;
@@ -48,6 +69,10 @@ const mutateGroup = (
 export const useEditorStateStore = create<EditorState>((set, get) => ({
   editorGroups: [newGroup()],
   activeGroupId: 'g1',
+  activeSelection: null,
+  setActiveSelection: (selection) => set({ activeSelection: selection }),
+  pendingReveal: null,
+  setPendingReveal: (reveal) => set({ pendingReveal: reveal }),
 
   openFile: (file, groupId) =>
     set((state) => {
@@ -160,6 +185,8 @@ export const useEditorStateStore = create<EditorState>((set, get) => ({
     }),
 }));
 
+const EMPTY_OPEN_FILES: OpenFile[] = [];
+
 /** Convenience selectors that match the previous ``useEditorStore`` shape
  *  so older call sites keep working while we migrate them. */
 export const selectActiveFile = (state: EditorState): OpenFile | null => {
@@ -170,7 +197,7 @@ export const selectActiveFile = (state: EditorState): OpenFile | null => {
 
 export const selectOpenFiles = (state: EditorState): OpenFile[] => {
   const group = state.editorGroups.find((g) => g.id === state.activeGroupId);
-  return group ? group.openFiles : [];
+  return group ? group.openFiles : EMPTY_OPEN_FILES;
 };
 
 export const selectActiveFileOrAny = (state: EditorState): OpenFile | null => {

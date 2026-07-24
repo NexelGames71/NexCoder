@@ -6,6 +6,10 @@ import EditorTabs from './EditorTabs';
 import MonacoEditor from './MonacoEditor';
 import DiffViewer from './DiffViewer';
 import WelcomeScreen from './WelcomeScreen';
+import ImagePreview from './ImagePreview';
+import MediaPreview from './MediaPreview';
+import ImplementationPlanView from '../Plan/ImplementationPlanView';
+import { getFilePreviewKind } from '../../utils/fileIcons';
 import './EditorArea.css';
 
 export default function EditorArea() {
@@ -20,6 +24,7 @@ export default function EditorArea() {
       <div className={`editor-groups ${settings.defaultSplitDirection === 'vertical' ? 'vertical' : 'horizontal'}`}>
         {editorGroups.map((group) => {
           const activeFile = group.openFiles.find((file) => file.path === group.activeFilePath) || null;
+          const previewKind = activeFile ? getFilePreviewKind(activeFile.path) : 'text';
           const isActiveGroup = activeGroupId === group.id;
           return (
             <div
@@ -32,7 +37,19 @@ export default function EditorArea() {
                 {activeDiff && isActiveGroup ? (
                   <DiffViewer diff={activeDiff} />
                 ) : activeFile ? (
-                  <MonacoEditor key={`${group.id}:${activeFile.path}`} file={activeFile} />
+                  activeFile.kind === 'implementation_plan' && activeFile.resourceId ? (
+                    <ImplementationPlanView planId={activeFile.resourceId} />
+                  ) : previewKind === 'image' ? (
+                    <ImagePreview key={`${group.id}:${activeFile.path}`} file={activeFile} />
+                  ) : previewKind !== 'text' ? (
+                    <MediaPreview
+                      key={`${group.id}:${activeFile.path}`}
+                      file={activeFile}
+                      kind={previewKind}
+                    />
+                  ) : (
+                    <MonacoEditor key={`${group.id}:${activeFile.path}`} file={activeFile} />
+                  )
                 ) : (
                   <WelcomeScreen />
                 )}

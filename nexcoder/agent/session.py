@@ -93,6 +93,7 @@ class SessionMetadata:
     status: str = "active"  # "active" | "complete" | "cancelled" | "error"
     tags: list[str] = field(default_factory=list)
     archived: bool = False
+    plan_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -110,6 +111,7 @@ class SessionMetadata:
             status=str(data.get("status", "active")),
             tags=list(data.get("tags") or []),
             archived=bool(data.get("archived", False)),
+            plan_id=str(data.get("plan_id", "")),
         )
 
 
@@ -290,6 +292,57 @@ class AgentSessionStore:
         """Stream messages one at a time. Useful for large sessions."""
         return self._iter_messages(session_id)
 
+    def truncate_messages(
+        self,
+        session_id: str,
+        keep_count: int,
+    ) -> list[SessionMessage]:
+        """Atomically keep only the first *keep_count* messages.
+
+        Prompt edit/resend uses this after file checkpoints have been restored.
+        Rewriting the short JSONL file avoids leaving the abandoned branch in
+        future model context while preserving every turn before the target.
+        """
+        with self._lock:
+            meta = self._read_meta(session_id)
+            messages = list(self._iter_messages(session_id))
+            if keep_count < 0 or keep_count > len(messages):
+                raise ValueError(
+                    f"Invalid message boundary {keep_count}; "
+                    f"session contains {len(messages)} messages")
+            retained = messages[:keep_count]
+            destination = self._messages_path(session_id)
+            fd, temporary = tempfile.mkstemp(
+                prefix="messages-", suffix=".jsonl.tmp",
+                dir=self._session_dir(session_id))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    for message in retained:
+                        fh.write(json.dumps(
+                            message.to_dict(), ensure_ascii=False) + "\n")
+                    fh.flush()
+                    try:
+                        os.fsync(fh.fileno())
+                    except OSError:
+                        pass
+                os.replace(temporary, destination)
+            except Exception:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+                raise
+
+            meta.message_count = len(retained)
+            meta.updated_at = retained[-1].created_at if retained else _utcnow()
+            meta.status = "active"
+            if not retained:
+                # Allows the replacement first prompt to become the title.
+                meta.title = "New session"
+            self._write_meta(meta)
+            self._update_index(meta, add=False)
+            return retained
+
     # ── Status ───────────────────────────────────────────────────────
 
     def set_status(self, session_id: str, status: str) -> None:
@@ -299,6 +352,15 @@ class AgentSessionStore:
         with self._lock:
             meta = self._read_meta(session_id)
             meta.status = status
+            meta.updated_at = _utcnow()
+            self._write_meta(meta)
+            self._update_index(meta, add=False)
+
+    def set_plan(self, session_id: str, plan_id: str) -> None:
+        """Associate the conversation with its active implementation plan."""
+        with self._lock:
+            meta = self._read_meta(session_id)
+            meta.plan_id = str(plan_id or "")
             meta.updated_at = _utcnow()
             self._write_meta(meta)
             self._update_index(meta, add=False)

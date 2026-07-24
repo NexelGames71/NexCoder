@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { FileNode } from '../../types';
-import { getFileIcon, getFileColor } from '../../utils/fileIcons';
+import { getFileIcon, getFileColor, getFilePreviewKind } from '../../utils/fileIcons';
 import { selectActiveFile, useEditorStateStore } from '../../store/useEditorStateStore';
-import { createDirectory, createFile, deleteFile, readFile, renameFile, spawnTerminal } from '../../services/bridge';
+import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
+import { createDirectory, createFile, deleteFile, readFile, renameFile, writeFile, writeFileBase64 } from '../../services/bridge';
 import { getLanguageFromExtension } from '../../utils/languageMap';
 import { useProjectStore } from '../../store/useProjectStore';
 import ExplorerContextMenu, { ExplorerMenuAction } from './ExplorerContextMenu';
@@ -16,8 +17,24 @@ interface FileTreeItemProps {
   forceOpenPaths?: Set<string>;
 }
 
+const parentDir = (p: string) => p.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]*$/, '') || p;
+const isImageName = (name: string) => /\.(png|jpg|jpeg|gif|webp|ico|bmp|avif)$/i.test(name);
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      resolve(result.slice(result.indexOf(',') + 1)); // strip data: prefix
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }: FileTreeItemProps) {
   const [manualOpen, setManualOpen] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [nameDialog, setNameDialog] = useState<{
     title: string;
@@ -33,8 +50,8 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
   const isDirectory = node.type === 'directory';
   const isForcedOpen = !!forceOpenPaths?.has(node.path);
   const isOpen = manualOpen || isForcedOpen;
-  const Icon = getFileIcon(node.extension, isDirectory, isOpen);
-  const color = isDirectory ? 'var(--accent-purple)' : getFileColor(node.extension);
+  const Icon = getFileIcon(node.extension, isDirectory, isOpen, node.name);
+  const color = isDirectory ? 'var(--accent-purple)' : getFileColor(node.extension, node.name);
   const isActive = activeFile?.path === node.path;
 
   const openNode = async () => {
@@ -44,6 +61,18 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
     }
 
     try {
+      const previewKind = getFilePreviewKind(node.path);
+      if (previewKind !== 'text') {
+        openFile({
+          path: node.path,
+          name: node.name,
+          content: '',
+          language: 'plaintext',
+          isDirty: false,
+        });
+        return;
+      }
+
       const res: any = await readFile(node.path);
       if (res && res.success) {
         openFile({
@@ -105,7 +134,7 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
       return;
     }
     if (action === 'open-terminal') {
-      await spawnTerminal(isDirectory ? node.path : parentPath());
+      window.nexcoder?.newTerminal(isDirectory ? node.path : parentPath());
       return;
     }
     if (action === 'refresh') {
@@ -127,6 +156,11 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
       return;
     }
     if (action === 'delete') {
+      const { confirmFileDelete } = useEditorSettingsStore.getState().settings;
+      if (confirmFileDelete
+          && !window.confirm(`Delete ${node.name}? This cannot be undone.`)) {
+        return;
+      }
       const res = await deleteFile(node.path);
       if (!res?.success) {
         if (res?.details?.reason !== 'user_cancelled') {
@@ -171,12 +205,78 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
     }
   };
 
+  // ── Drag & drop ──────────────────────────────────────────────────
+  const dropFolder = () => isDirectory ? node.path : parentDir(node.path);
+
+  const handleDragStart = (e: React.DragEvent) => {
+    e.stopPropagation();
+    e.dataTransfer.setData('application/x-nexcoder-path', node.path);
+    e.dataTransfer.setData('text/plain', node.path);
+    e.dataTransfer.effectAllowed = 'copyMove';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    // Accept internal moves and OS file drops onto folders.
+    if (!isDirectory && !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = e.dataTransfer.types.includes('Files') ? 'copy' : 'move';
+    if (!dropActive) setDropActive(true);
+  };
+
+  const handleDragLeave = () => setDropActive(false);
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropActive(false);
+    const target = dropFolder();
+
+    // OS files dragged in from outside the IDE.
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      for (const file of Array.from(e.dataTransfer.files)) {
+        const dest = joinPath(target, file.name);
+        try {
+          if (isImageName(file.name) || file.type.startsWith('image/')
+              || /\.(png|jpg|jpeg|gif|webp|ico|bmp|pdf|zip|exe|dll|wasm|gguf|bin)$/i.test(file.name)) {
+            const b64 = await fileToBase64(file);
+            await writeFileBase64(dest, b64);
+          } else {
+            await writeFile(dest, await file.text());
+          }
+        } catch (err) { console.error('Import failed', err); }
+      }
+      if (isDirectory) setManualOpen(true);
+      await onRefresh?.();
+      return;
+    }
+
+    // Internal move: reparent the dragged path into this folder.
+    const src = e.dataTransfer.getData('application/x-nexcoder-path');
+    if (!src || src === node.path) return;
+    const srcName = src.split(/[\\/]/).pop() || src;
+    const dest = joinPath(target, srcName);
+    if (dest === src || parentDir(src) === target) return;
+    if (isDirectory && (target + '/').startsWith(src.replace(/\\/g, '/') + '/')) return; // no folder into itself
+    try {
+      const res = await renameFile(src, dest);
+      if (!res?.success) { window.alert(res?.error || 'Move failed'); return; }
+      if (isDirectory) setManualOpen(true);
+      await onRefresh?.();
+    } catch (err) { console.error('Move failed', err); }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div
-        className={`file-tree-item ${isActive ? 'active' : ''}`}
+        className={`file-tree-item ${isActive ? 'active' : ''} ${dropActive ? 'drop-target' : ''}`}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         style={{ paddingLeft: `${depth * 12 + 12}px` }}
       >
         {isDirectory ? (
