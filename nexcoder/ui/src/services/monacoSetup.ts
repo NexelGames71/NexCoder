@@ -13,6 +13,7 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
 import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
+import type { EditorTheme } from './theme';
 
 (self as any).MonacoEnvironment = {
   getWorker(_workerId: string, label: string) {
@@ -91,21 +92,13 @@ monaco.editor.defineTheme('github-dark', {
 export { monaco };
 
 /** Map a settings theme id to a registered Monaco theme id. */
-export function toMonacoTheme(setting: string): string {
+export function toMonacoTheme(setting: EditorTheme): string {
   switch (setting) {
     case 'nexcoder': return 'nexcoder-theme';
     case 'light': case 'vs': return 'vs';
     case 'vs-dark': case 'hc-black':
     case 'dark-plus': case 'github-dark':
-    case 'nexcoder-theme':
       return setting;
     default: return 'nexcoder-theme';
   }
-}
-
-/** Shell (IDE chrome) theme for :root[data-theme] CSS variable blocks. */
-export function toShellTheme(setting: string): string | null {
-  if (setting === 'light' || setting === 'vs') return 'light';
-  if (setting === 'hc-black') return 'hc-black';
-  return null; // default dark shell
 }

@@ -1,0 +1,54 @@
+.implementation-plan-view { height: 100%; min-height: 0; display: flex; flex-direction: column; color: var(--text-primary); background: var(--bg-primary); }
+.plan-document-header { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.plan-document-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.plan-document-title svg { color: var(--accent-purple); }
+.plan-document-title h1 { margin: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-document-title span { color: var(--text-tertiary); font-size: 10px; }
+.plan-review-toolbar { display: flex; align-items: center; gap: 5px; }
+.plan-review-toolbar .btn { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; white-space: nowrap; }
+.plan-review-toolbar .plan-cancel { color: var(--accent-red); }
+.plan-document-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); overflow: hidden; }
+.plan-toc { display: flex; flex-direction: column; gap: 8px; padding: 22px 14px; overflow-y: auto; border-right: 1px solid var(--border); color: var(--text-tertiary); font-size: 10px; }
+.plan-toc > strong { color: var(--text-secondary); text-transform: uppercase; letter-spacing: .08em; font-size: 9px; }
+.plan-toc > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-meta-card { display: flex; flex-direction: column; gap: 7px; padding-top: 12px; margin-top: 8px; border-top: 1px solid var(--border-subtle); }
+.plan-meta-card span { display: flex; align-items: center; gap: 5px; }
+.plan-document-content { overflow-y: auto; padding: 28px clamp(24px, 6vw, 76px) 60px; }
+.plan-markdown { max-width: 920px; margin: 0 auto; line-height: 1.65; font-size: 13px; }
+.plan-markdown h1 { font-size: 25px; margin: 0 0 24px; }
+.plan-markdown h2 { font-size: 17px; margin: 30px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-subtle); }
+.plan-markdown h3 { font-size: 14px; margin: 22px 0 8px; }
+.plan-markdown code { padding: 2px 5px; border-radius: 4px; background: var(--bg-elevated); color: var(--accent-blue); font-family: var(--font-code); }
+.plan-status-banner { max-width: 920px; margin: 0 auto 18px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-left: 3px solid var(--accent-purple); background: var(--accent-purple-dim); border-radius: var(--radius-sm); font-size: 11px; text-transform: capitalize; }
+.plan-status-banner span { color: var(--text-secondary); text-transform: none; }
+.plan-status-banner.is-executing { border-color: var(--accent-blue); }
+.plan-status-banner.is-completed { border-color: var(--accent-green); }
+.plan-error { max-width: 920px; margin: 0 auto 14px; display: flex; gap: 8px; align-items: center; padding: 9px 11px; color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent-red) 30%, transparent); border-radius: var(--radius-sm); font-size: 11px; }
+.plan-review-box, .plan-clarification, .plan-progress { max-width: 920px; margin: 0 auto 22px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-secondary); }
+.plan-review-box textarea { width: 100%; resize: vertical; margin: 8px 0; }
+.plan-review-box > div { display: flex; justify-content: flex-end; gap: 6px; }
+.plan-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.plan-section-heading h2 { margin: 0; font-size: 15px; }
+.plan-section-heading span { color: var(--text-tertiary); font-size: 10px; }
+.plan-clarification > p { color: var(--text-secondary); font-size: 11px; }
+.plan-question { margin: 14px 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.plan-question legend { padding: 0 5px; font-weight: 600; font-size: 12px; }
+.plan-question > p { color: var(--text-secondary); font-size: 10px; }
+.plan-options { display: grid; gap: 6px; }
+.plan-option { display: flex; align-items: flex-start; gap: 8px; padding: 8px; border-radius: var(--radius-sm); background: var(--bg-deep); cursor: pointer; }
+.plan-option span { display: flex; flex-direction: column; gap: 2px; }
+.plan-option small { color: var(--text-tertiary); }
+.plan-answer-input { width: 100%; }
+.plan-question-navigation { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.plan-question-navigation > span { margin-right: auto; color: var(--text-tertiary); font-size: 10px; }
+.plan-progress { margin-top: 28px; }
+.plan-progress-track { height: 4px; margin: 12px 0 16px; overflow: hidden; border-radius: 2px; background: var(--bg-deep); }
+.plan-progress-track span { display: block; height: 100%; background: var(--accent-purple); transition: width .2s ease; }
+.plan-progress-phase { display: flex; align-items: center; gap: 9px; padding: 6px 0; }
+.plan-progress-dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--text-tertiary); }
+.plan-progress-phase.is-completed .plan-progress-dot { border-color: var(--accent-green); background: var(--accent-green); }
+.plan-progress-phase.is-in_progress .plan-progress-dot { border-color: var(--accent-purple); background: var(--accent-purple); box-shadow: 0 0 0 3px var(--accent-purple-dim); }
+.plan-progress-phase div { display: flex; flex-direction: column; }
+.plan-progress-phase small { color: var(--text-tertiary); text-transform: capitalize; }
+.plan-empty { height: 100%; display: grid; place-items: center; color: var(--text-tertiary); }
+@media (max-width: 900px) { .plan-document-layout { grid-template-columns: 1fr; } .plan-toc { display: none; } .plan-review-toolbar .btn:not(.btn-primary) { display: none; } }

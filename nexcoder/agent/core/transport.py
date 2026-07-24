@@ -303,6 +303,7 @@ class NativeAdapter:
 
     def parse_assistant_message(self, message: dict[str, Any]) -> ModelTurn:
         calls: list[ToolCall] = []
+        seen_calls: set[tuple[str, str]] = set()
         parse_error: str | None = None
         for raw in message.get("tool_calls") or []:
             fn = raw.get("function") or {}
@@ -315,6 +316,17 @@ class NativeAdapter:
             if not isinstance(args, dict):
                 parse_error = f"Arguments for {name} must be a JSON object"
                 continue
+            # Some hosted tool models can emit the exact same call twice in
+            # one streamed turn. Running duplicate reads wastes quota; running
+            # duplicate writes or commands can be destructive. Keep the first
+            # call id and discard only exact name+argument duplicates.
+            signature = (
+                name,
+                json.dumps(args, sort_keys=True, separators=(",", ":")),
+            )
+            if signature in seen_calls:
+                continue
+            seen_calls.add(signature)
             calls.append(ToolCall(id=str(raw.get("id") or _new_call_id()),
                                   name=name, args=args))
         return ModelTurn(text=str(message.get("content") or "").strip(),

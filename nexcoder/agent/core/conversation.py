@@ -20,9 +20,25 @@ def estimate_tokens(text: str) -> int:
 
 
 def message_tokens(message: dict[str, Any]) -> int:
-    content = str(message.get("content") or "")
+    raw_content = message.get("content")
+    image_tokens = 0
+    if isinstance(raw_content, list):
+        text_parts: list[str] = []
+        for part in raw_content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text_parts.append(str(part.get("text") or ""))
+            elif part.get("type") in {"image_url", "input_image"}:
+                # A conservative fixed allowance avoids counting base64 bytes
+                # as text while leaving room for provider-side image tokens.
+                image_tokens += 1200
+        content = "\n".join(text_parts)
+    else:
+        content = str(raw_content or "")
     extra = json.dumps(message["tool_calls"]) if message.get("tool_calls") else ""
-    return estimate_tokens(content) + (estimate_tokens(extra) if extra else 0) + 6
+    return (estimate_tokens(content) + image_tokens
+            + (estimate_tokens(extra) if extra else 0) + 6)
 
 
 def _collapse_tool_content(content: str) -> str:

@@ -11,7 +11,7 @@ whether to surface a "Redacted N items" hint to the user, log the
 labels for compliance, or refuse to send the prompt entirely.
 
 The redaction is **not** a substitute for a real secrets scanner — it
-catches the obvious patterns (AWS keys, GitHub PATs, OpenAI keys,
+    catches the obvious patterns (AWS keys, GitHub PATs, AI-provider keys,
 private keys, JWTs, emails, credit cards, IPv4). Anything genuinely
 novel will pass through. Use a dedicated scanner (e.g. ``gitleaks``)
 for compliance-grade detection.
@@ -46,6 +46,7 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     # AI provider keys (specific variants first, then the generic sk-)
     ("openai_project_key", re.compile(r"sk-proj-[A-Za-z0-9_-]{20,}")),
     ("anthropic_api_key", re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}")),
+    ("nvidia_api_key", re.compile(r"nvapi-[A-Za-z0-9_-]{20,}")),
     ("openai_api_key", re.compile(r"sk-[A-Za-z0-9_-]{20,}")),
     # Source-control PATs
     ("github_pat", re.compile(r"ghp_[A-Za-z0-9]{36,}")),

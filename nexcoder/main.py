@@ -34,6 +34,18 @@ def _load_env() -> None:
             return
 
 
+def dispatch() -> None:
+    args = sys.argv[1:]
+    if args:
+        if args[0] == "cli":
+            from nexcoder.cli import main as cli_main
+            raise SystemExit(cli_main(args[1:] + ["--interactive"]))
+        if args[0] == "start" and len(args) > 1 and args[1] == "cli":
+            from nexcoder.cli import main as cli_main
+            raise SystemExit(cli_main(args[2:] + ["--interactive"]))
+    main()
+
+
 def main() -> None:
     """Launch the NexCoder desktop application."""
     _load_env()

@@ -1,14 +1,15 @@
 """LspManager — one lazily-started language server per language family.
 
 Resolution order for server binaries: NexCoder's self-contained
-``language-servers/node_modules`` (installed via npm into the repo /
-install dir), then PATH. Missing servers degrade gracefully: the
+``language-servers/node_modules`` (installed via npm into the repo or frozen
+application bundle), then PATH. Missing servers degrade gracefully: the
 language reports ``unavailable`` and every request returns empty.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -49,7 +50,12 @@ _NODE_SERVERS = {
 def _servers_root() -> Path:
     import sys
     if getattr(sys, "frozen", False):
-        # Packaged app: language-servers/ sits next to the executable.
+        # PyInstaller 6 one-folder apps keep data inside _internal and expose
+        # that location as _MEIPASS. Fall back to the executable directory for
+        # older/custom layouts.
+        bundle_root = getattr(sys, "_MEIPASS", None)
+        if bundle_root:
+            return Path(bundle_root).resolve() / "language-servers"
         return Path(sys.executable).resolve().parent / "language-servers"
     return Path(__file__).resolve().parents[2] / "language-servers"
 
@@ -60,7 +66,8 @@ def resolve_server_command(family: str) -> list[str] | None:
     if entry is None:
         return None
     script_rel, path_fallback = entry
-    node = shutil.which("node")
+    bundled_node = _servers_root() / ("node.exe" if os.name == "nt" else "node")
+    node = str(bundled_node) if bundled_node.is_file() else shutil.which("node")
     script = _servers_root() / "node_modules" / script_rel
     if node and script.is_file():
         return [node, str(script), "--stdio"]

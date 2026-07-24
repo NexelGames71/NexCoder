@@ -8,6 +8,8 @@ import { writeFile } from '../../services/bridge';
 import { notifyChange, notifyOpen } from '../../services/lsp';
 import { registerLspProviders, registerModel } from '../../services/monacoLsp';
 import { toMonacoTheme } from '../../services/monacoSetup';
+import { useProjectStore } from '../../store/useProjectStore';
+import { buildDiagnosticFixPrompt, loadComposerPrompt } from '../../utils/diagnosticPrompt';
 
 interface MonacoEditorProps {
   file: OpenFile;
@@ -25,6 +27,62 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const sendMarkerToComposer = (monaco: Monaco, editor: any, send: boolean) => {
+    const model = editor.getModel();
+    const position = editor.getPosition();
+    if (!model || !position) return;
+    const markers = monaco.editor.getModelMarkers({ resource: model.uri })
+      .filter((marker: any) =>
+        marker.owner === 'nexlsp'
+        && marker.startLineNumber <= position.lineNumber
+        && marker.endLineNumber >= position.lineNumber
+        && (
+          (marker.startColumn <= position.column && marker.endColumn >= position.column)
+          || marker.startLineNumber === position.lineNumber
+        ));
+    const marker = markers[0];
+    if (!marker) return;
+    const projectPath = useProjectStore.getState().projectPath;
+    const path = fileRef.current.path;
+    const shortPath = projectPath && path.toLowerCase().startsWith(projectPath.toLowerCase())
+      ? path.slice(projectPath.length).replace(/^[\\/]/, '')
+      : path;
+    const markerSeverityMap: Record<number, number> = {
+      [monaco.MarkerSeverity.Error]: 1,
+      [monaco.MarkerSeverity.Warning]: 2,
+      [monaco.MarkerSeverity.Info]: 3,
+      [monaco.MarkerSeverity.Hint]: 4,
+    };
+    const markerCode = typeof marker.code === 'string' || typeof marker.code === 'number'
+      ? marker.code
+      : marker.code?.value !== undefined
+        ? String(marker.code.value)
+        : undefined;
+    const prompt = buildDiagnosticFixPrompt({
+      path,
+      shortPath,
+      diagnostic: {
+        range: {
+          start: {
+            line: Math.max(0, marker.startLineNumber - 1),
+            character: Math.max(0, marker.startColumn - 1),
+          },
+          end: {
+            line: Math.max(0, marker.endLineNumber - 1),
+            character: Math.max(0, marker.endColumn - 1),
+          },
+        },
+        message: marker.message,
+        severity: markerSeverityMap[marker.severity] ?? 3,
+        source: marker.source,
+        code: markerCode,
+      },
+      lineText: model.getLineContent(marker.startLineNumber),
+    });
+    window.nexcoder?.showAIPanel?.();
+    loadComposerPrompt({ content: prompt, mode: 'agent', send });
+  };
 
   const handleEditorDidMount = (editor: any, monaco: Monaco) => {
     editorRef.current = editor;
@@ -109,19 +167,20 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
       }
     });
 
-    // Add Context Menu actions for Ask AI
     editor.addAction({
-      id: 'ask-nexcoder-ai',
-      label: 'Ask NexCoder AI',
+      id: 'send-diagnostic-to-nexcoder-chat',
+      label: 'Send Problem to Chat',
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0.9,
+      run: (ed: any) => sendMarkerToComposer(monaco, ed, false),
+    });
+
+    editor.addAction({
+      id: 'fix-diagnostic-with-nexcoder-agent',
+      label: 'Fix Problem with NexCoder Agent',
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 1,
-      run: (ed: any) => {
-        const selection = ed.getModel().getValueInRange(ed.getSelection());
-        if (selection) {
-          // Trigger Chat with selected text
-          // Can expose to global state or chat store
-        }
-      },
+      run: (ed: any) => sendMarkerToComposer(monaco, ed, true),
     });
   };
 
@@ -218,6 +277,8 @@ export default function MonacoEditor({ file }: MonacoEditorProps) {
           folding: settings.codeFolding,
           matchBrackets: settings.bracketMatching ? 'always' : 'never',
           fontFamily: settings.fontFamily || 'var(--font-code)',
+          readOnly: file.kind === 'artifact',
+          readOnlyMessage: { value: 'Artifacts are read-only. Use Save in the Artifacts panel to write one into the project.' },
           automaticLayout: true,
           cursorBlinking: 'smooth',
           cursorSmoothCaretAnimation: 'on',

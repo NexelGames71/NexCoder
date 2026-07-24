@@ -158,7 +158,35 @@ def test_mesh_run_end_to_end(tmp_path):
     assert len(runs) == 1 and runs[0]["status"] == "completed"
 
 
-def test_mesh_blocks_dependents_of_failed_units(tmp_path):
+def test_mesh_preserves_long_goal_for_planner_and_specialist(tmp_path):
+    goal = "Build a production game.\n" + ("Detailed requirement. " * 1200)
+    plan = json.dumps([{
+        "id": "review", "title": "Review", "role": "review",
+        "description": "Verify every requirement.",
+    }])
+    model = FakeModel([
+        {"role": "assistant", "content": plan},
+        {"role": "assistant", "content": "Reviewed."},
+        {"role": "assistant", "content": "All requirements reviewed."},
+    ])
+    orchestrator = MeshOrchestrator(
+        project_root=tmp_path, model=model, adapter=XmlAdapter(),
+        permission_gate=AllowGate(), emit=lambda *_: None)
+
+    summary = orchestrator.run(goal)
+
+    assert model.received[0][-1]["content"] == goal
+    assert goal in model.received[1][-1]["content"]
+    assert summary["goal"] == goal
+    # The sidebar history uses a compact preview, while the persisted run
+    # keeps the full request for audit/resume fidelity.
+    saved = json.loads((tmp_path / ".nexcoder" / "mesh"
+                        / f"{summary['mesh_id']}.json").read_text(encoding="utf-8"))
+    assert saved["goal"] == goal
+    assert list_mesh_runs(tmp_path)[0]["goal"] == goal[:160]
+
+
+def test_mesh_continues_dependents_in_degraded_mode(tmp_path):
     plan = json.dumps([
         {"id": "build", "title": "Build", "role": "implementation",
          "description": "impossible thing"},
@@ -184,4 +212,47 @@ def test_mesh_blocks_dependents_of_failed_units(tmp_path):
     assert summary["status"] == "completed_with_issues"
     statuses = {u["id"]: u["status"] for u in summary["units"]}
     assert statuses["build"] == "failed"
-    assert statuses["verify"] == "blocked"
+    assert statuses["verify"] == "failed"
+    assert any(event_type == "agent_degraded" for event_type, _ in events)
+
+
+def test_mesh_can_complete_implementation_after_explorer_failure(tmp_path):
+    plan = json.dumps([
+        {"id": "scout", "title": "Scout", "role": "explorer",
+         "description": "Find the entry point."},
+        {"id": "build", "title": "Build", "role": "implementation",
+         "description": "Create hello.txt", "dependencies": ["scout"]},
+    ])
+    write_call = ('<tool_call>\n{"name": "write_file", "arguments": '
+                  '{"path": "hello.txt", "content": "recovered"}}\n</tool_call>')
+
+    class RecoveringModel(FakeModel):
+        def __init__(self):
+            super().__init__([
+                {"role": "assistant", "content": plan},
+                {"role": "assistant", "content": write_call},
+                {"role": "assistant", "content": "Created hello.txt independently."},
+                {"role": "assistant", "content": "Implementation recovered the goal."},
+            ])
+            self.calls = 0
+
+        def complete(self, messages, *, extras, on_delta=None):
+            self.calls += 1
+            if self.calls == 2:  # explorer model call
+                self.received.append(messages)
+                raise RuntimeError("scout backend failure")
+            return super().complete(messages, extras=extras, on_delta=on_delta)
+
+    events = []
+    orchestrator = MeshOrchestrator(
+        project_root=tmp_path, model=RecoveringModel(), adapter=XmlAdapter(),
+        permission_gate=AllowGate(),
+        emit=lambda t, p: events.append((t, p)))
+    summary = orchestrator.run("Create hello.txt")
+
+    statuses = {u["id"]: u["status"] for u in summary["units"]}
+    assert statuses == {"scout": "failed", "build": "completed"}
+    assert (tmp_path / "hello.txt").read_text(encoding="utf-8") == "recovered"
+    assert summary["mutated_files"] == ["hello.txt"]
+    assert summary["status"] == "completed_with_issues"
+    assert any(event_type == "agent_degraded" for event_type, _ in events)

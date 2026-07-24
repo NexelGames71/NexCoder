@@ -21,6 +21,9 @@ EventType = Literal[
     "checkpoint_created",
     "compaction",
     "context_usage",
+    "plan_updated",
+    "plan_questions",
+    "plan_deviation",
     "run_completed",
     "run_error",
 ]

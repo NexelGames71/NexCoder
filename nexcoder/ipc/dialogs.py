@@ -26,6 +26,16 @@ class DialogHandler:
         )
         return folder if folder else None
 
+    def select_folder(self, title: str = "Select Folder") -> str | None:
+        """Show a native folder picker without implying project open."""
+        folder = QFileDialog.getExistingDirectory(
+            self._parent,
+            title,
+            os.path.expanduser("~"),
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontResolveSymlinks,
+        )
+        return folder if folder else None
+
     def open_file(self, title: str = "Open File", filters: str = "All Files (*)") -> str | None:
         """Show a native file open dialog."""
         file_path, _ = QFileDialog.getOpenFileName(

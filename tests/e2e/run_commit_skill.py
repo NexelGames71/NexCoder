@@ -26,7 +26,7 @@ def main() -> int:
         "def greet(name='world'):\n    return f'hello {name}'\n", encoding="utf-8")
     print(f"Workdir: {workdir}")
     proc = subprocess.run(
-        [sys.executable, "-m", "nexcoder.cli", "--engine", "v2", "--auto",
+        [sys.executable, "-m", "nexcoder.cli", "--auto",
          "--project", str(workdir), "--skill", "commit",
          "Commit the current changes."],
         timeout=900)

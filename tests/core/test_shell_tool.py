@@ -59,3 +59,20 @@ def test_run_command_timeout(tmp_path):
     result = belt.execute("run_command",
                           {"command": f'"{sys.executable}" -c "{code}"', "timeout": 2}, ctx)
     assert result["error_code"] == "tool_timeout"
+
+
+def test_command_environment_redacts_secrets(monkeypatch, tmp_path):
+    from nexcoder.agent.core.tools.shell import command_environment
+    monkeypatch.setenv("NEXCODER_TEST_TOKEN", "do-not-leak")
+    monkeypatch.setenv("ORDINARY_SETTING", "visible")
+    environment = command_environment(str(tmp_path))
+    assert "NEXCODER_TEST_TOKEN" not in environment
+    assert environment["ORDINARY_SETTING"] == "visible"
+    assert environment["NEXCODER_PROJECT_ROOT"] == str(tmp_path)
+
+
+def test_command_environment_supports_explicit_opt_in(monkeypatch, tmp_path):
+    from nexcoder.agent.core.tools.shell import command_environment
+    monkeypatch.setenv("PROJECT_API_KEY", "allowed-for-test")
+    monkeypatch.setenv("NEXCODER_COMMAND_ENV_ALLOW", "PROJECT_API_KEY")
+    assert command_environment(str(tmp_path))["PROJECT_API_KEY"] == "allowed-for-test"

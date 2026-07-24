@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 const WORKING_WORDS = ['Thinking', 'Working', 'Reasoning'];
 
@@ -20,6 +21,8 @@ function WorkingIndicator() {
 import { Terminal, FilePenLine, FilePlus2, FileText, Search, FolderOpen, BookOpen, ListChecks, Wrench, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAgentRunStore, TranscriptItem } from '../../store/useAgentRunStore';
 import { agentPermissionResponse, agentRevertFile, agentRevertRun } from '../../services/bridge';
+import { sanitizeAssistantText } from './assistantText';
+import UserPromptCard from './UserPromptCard';
 
 interface DiffRow { type: 'add' | 'del' | 'ctx' | 'hunk'; text: string; oldNo?: number; newNo?: number; }
 
@@ -147,12 +150,20 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
 
       {transcript.map((item, index) => {
         if (item.kind === 'text') {
-          return item.text.trim()
-            ? <p key={index} className="agent-run-prose">{item.text}</p>
+          const text = sanitizeAssistantText(item.text);
+          return text
+            ? <div key={index} className="agent-run-prose chat-markdown"><ReactMarkdown>{text}</ReactMarkdown></div>
             : null;
         }
         if (item.kind === 'notice') {
           return <div key={index} className="agent-run-notice">{item.text}</div>;
+        }
+        if (item.kind === 'steer') {
+          return (
+            <div key={item.id} className="agent-run-steering-prompt">
+              <UserPromptCard text={item.text} attachments={item.attachments} compact />
+            </div>
+          );
         }
         const { icon: Icon, label, detail } = describeStep(item);
         const streaming = !item.done && item.streamingChars !== undefined;
@@ -223,7 +234,11 @@ export default function AgentRunPanel({ runId }: { runId: string }) {
 
       {!runActive && status && (
         <div className="agent-run-footer">
-          {finalText && <p className="agent-run-prose">{finalText}</p>}
+          {sanitizeAssistantText(finalText) && (
+            <div className="agent-run-prose chat-markdown">
+              <ReactMarkdown>{sanitizeAssistantText(finalText)}</ReactMarkdown>
+            </div>
+          )}
           {status !== 'completed' && <div className={`run-status run-status-${status}`}>{status}</div>}
           {mutatedFiles.length > 0 && checkpointId && (
             <div className="agent-run-files">

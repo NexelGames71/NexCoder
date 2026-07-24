@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import TopBar from './components/TopBar/TopBar';
 import Sidebar from './components/Sidebar/Sidebar';
 import EditorArea from './components/Editor/EditorArea';
@@ -57,12 +57,17 @@ function withStartupTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = 350
 }
 
 export default function App() {
-  const { setProject, setFileTree, projectPath, setRecentProjects } = useProjectStore();
-  const editorState = useEditorStateStore();
-  const activeFile = selectActiveFile(editorState);
-  const openFiles = selectOpenFiles(editorState);
-  const { setFileDirty, replaceFileContent } = useEditorStateStore();
-  const { settings: agentSettings, hydrateSettings } = useAgentStore();
+  const projectPath = useProjectStore((s) => s.projectPath);
+  const setProject = useProjectStore((s) => s.setProject);
+  const setFileTree = useProjectStore((s) => s.setFileTree);
+  const setRecentProjects = useProjectStore((s) => s.setRecentProjects);
+
+  const activeFile = useEditorStateStore(selectActiveFile);
+  const openFiles = useEditorStateStore(selectOpenFiles);
+  const setFileDirty = useEditorStateStore((s) => s.setFileDirty);
+  const replaceFileContent = useEditorStateStore((s) => s.replaceFileContent);
+
+  const agentSettings = useAgentStore((s) => s.settings);
   const updateAgentSetting = useAgentStore((s) => s.updateSetting);
   // Select the stable store slice, then derive counts. Computing a fresh
   // object inside the selector returns a new snapshot every render, which
@@ -89,7 +94,7 @@ export default function App() {
         if (!active || !result?.success || !result.settings) return;
         if (hasSavedAgentSettings) return;
         const backend = result.settings;
-        hydrateSettings({
+        useAgentStore.getState().hydrateSettings({
           aiEndpoint: backend.base_url,
           aiModel: backend.model,
           adapter: backend.adapter,
@@ -103,7 +108,7 @@ export default function App() {
       .catch((error) => console.error('Failed to hydrate engine settings:', error))
       .finally(() => { if (active) setEngineSettingsReady(true); });
     return () => { active = false; };
-  }, [hydrateSettings]);
+  }, []);
 
   // Sync AI settings to Python backend whenever they change in the UI
   useEffect(() => {

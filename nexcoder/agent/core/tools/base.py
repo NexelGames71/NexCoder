@@ -39,6 +39,9 @@ class ToolContext:
         permission_gate: PermissionGate | None = None,
         run_id: str = "",
         cancel_token: CancellationToken | None = None,
+        plan_manager: Any = None,
+        plan_id: str = "",
+        plan_revision: int = 0,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.emit = emit
@@ -47,6 +50,9 @@ class ToolContext:
         self.permission_gate = permission_gate or AllowAllGate()
         self.run_id = run_id
         self.cancel_token = cancel_token
+        self.plan_manager = plan_manager
+        self.plan_id = plan_id
+        self.plan_revision = plan_revision
         self.checkpoint_id: str | None = None
         self.mutated_files: set[str] = set()
         self.todos: list[dict[str, Any]] = []
@@ -117,6 +123,19 @@ class ToolBelt:
         if spec is None:
             return {"success": False, "error_code": "unknown_tool",
                     "error": f"Unknown tool: {name}"}
+        if spec.mutating and ctx.plan_id:
+            try:
+                if ctx.plan_manager is None:
+                    raise RuntimeError("Plan execution context is unavailable")
+                ctx.plan_manager.assert_mutation_allowed(
+                    ctx.plan_id, ctx.plan_revision)
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "error_code": "plan_approval_required",
+                    "error": str(exc) or (
+                        "Execution blocked: the implementation plan has not been approved."),
+                }
         try:
             return spec.handler(args, ctx)
         except Exception as exc:  # tool bugs become observations, never crashes

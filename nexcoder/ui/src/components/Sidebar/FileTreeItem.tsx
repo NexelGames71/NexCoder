@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { FileNode } from '../../types';
-import { getFileIcon, getFileColor } from '../../utils/fileIcons';
+import { getFileIcon, getFileColor, getFilePreviewKind } from '../../utils/fileIcons';
 import { selectActiveFile, useEditorStateStore } from '../../store/useEditorStateStore';
 import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
-import { createDirectory, createFile, deleteFile, readFile, renameFile, spawnTerminal, writeFile, writeFileBase64 } from '../../services/bridge';
+import { createDirectory, createFile, deleteFile, readFile, renameFile, writeFile, writeFileBase64 } from '../../services/bridge';
 import { getLanguageFromExtension } from '../../utils/languageMap';
 import { useProjectStore } from '../../store/useProjectStore';
 import ExplorerContextMenu, { ExplorerMenuAction } from './ExplorerContextMenu';
@@ -61,6 +61,18 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
     }
 
     try {
+      const previewKind = getFilePreviewKind(node.path);
+      if (previewKind !== 'text') {
+        openFile({
+          path: node.path,
+          name: node.name,
+          content: '',
+          language: 'plaintext',
+          isDirty: false,
+        });
+        return;
+      }
+
       const res: any = await readFile(node.path);
       if (res && res.success) {
         openFile({
@@ -122,7 +134,7 @@ export default function FileTreeItem({ node, depth, onRefresh, forceOpenPaths }:
       return;
     }
     if (action === 'open-terminal') {
-      await spawnTerminal(isDirectory ? node.path : parentPath());
+      window.nexcoder?.newTerminal(isDirectory ? node.path : parentPath());
       return;
     }
     if (action === 'refresh') {

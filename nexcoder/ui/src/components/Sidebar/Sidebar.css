@@ -237,33 +237,211 @@
 }
 
 /* Agent Tasks panel cards (live v2 runs) */
+.tasks-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.tasks-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: var(--space-3);
+}
+
+.tasks-summary-grid div {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  padding: 7px 6px;
+}
+
+.tasks-summary-grid strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.1;
+}
+
+.tasks-summary-grid span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.tasks-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-3);
+  color: var(--text-tertiary);
+  text-align: center;
+  font-size: var(--font-size-xs);
+}
+
+.tasks-empty svg {
+  color: var(--accent-purple);
+}
+
 .task-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 9px 10px;
+  padding: 10px;
   margin-bottom: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 7px;
 }
-.task-card-head { display: flex; align-items: center; gap: 6px; }
+
+.task-card.active-run {
+  border-color: color-mix(in srgb, var(--accent-purple) 45%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-purple) 18%, transparent);
+}
+
+.task-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .task-card-status {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
   color: var(--text-secondary); font-weight: 600;
 }
+
+.task-context {
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.task-context.warm {
+  color: #f2d98c;
+}
+
+.task-context.hot {
+  color: #ff9b9b;
+}
+
 .task-card-files {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 3px;
+  display: inline-flex; align-items: center; gap: 3px;
   font-size: 10px; color: var(--accent-green, #22c55e);
 }
+
 .task-card-title {
+  margin: 0;
   font-size: 11.5px; color: var(--text-primary); line-height: 1.4;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.task-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-input);
+}
+
+.task-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-purple);
+}
+
 .task-card-meta {
-  display: flex; gap: 10px; font-size: 10px; color: var(--text-tertiary);
+  display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: var(--text-tertiary);
   font-family: var(--font-code);
+}
+
+.task-card-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.task-card-preview {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.task-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.task-card-actions button {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  padding: 0 7px;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.task-card-actions button:hover {
+  border-color: var(--accent-purple);
+  color: var(--text-primary);
+  background: var(--accent-purple-dim);
+}
+
+.task-card-details {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 7px;
+}
+
+.task-detail-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.task-detail-line svg {
+  margin-top: 1px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.task-detail-line span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail-line.muted {
+  color: var(--text-tertiary);
+  padding-left: 17px;
 }
 
 .explorer-dialog-backdrop {

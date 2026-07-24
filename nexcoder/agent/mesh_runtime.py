@@ -35,13 +35,19 @@ class MeshWorker(QThread):
         self._gate = gate
         self._autonomy = autonomy if autonomy in AUTONOMY_LEVELS else "ask"
         self.cancel_token = CancellationToken()
+        self._connector: ModelConnector | None = None
 
     def cancel(self) -> None:
         self.cancel_token.cancel()
+        connector = self._connector
+        if connector is not None:
+            connector.cancel_current_request()
 
     def run(self) -> None:
         try:
             config = load_backend_config()
+            connector = ModelConnector()
+            self._connector = connector
             permission_gate = AllowlistGate(
                 AutonomyGate(self._gate, self._autonomy),
                 self._project_root)
@@ -58,7 +64,7 @@ class MeshWorker(QThread):
 
             orchestrator = MeshOrchestrator(
                 project_root=self._project_root,
-                model=AgentModelClient(ModelConnector()),
+                model=AgentModelClient(connector),
                 adapter=get_adapter(config.adapter),
                 permission_gate=permission_gate,
                 emit=lambda event_type, payload: self.event_json.emit(
@@ -77,5 +83,7 @@ class MeshWorker(QThread):
             self.event_json.emit(json.dumps(
                 {"type": "mesh_error", "payload": {"error": str(exc)}},
                 ensure_ascii=False, default=str))
+        finally:
+            self._connector = None
         self.finished_json.emit(json.dumps(summary, ensure_ascii=False,
                                            default=str))

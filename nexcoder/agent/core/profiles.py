@@ -14,8 +14,10 @@ from nexcoder.agent.core.belt_factory import build_default_belt
 from nexcoder.agent.core.loop import AGENT_SYSTEM_PROMPT
 from nexcoder.agent.core.tools.base import ToolBelt
 
-READ_TOOLS = ("read_file", "glob", "grep", "list_directory",
+READ_TOOLS = ("read_file", "glob", "grep", "code_search", "list_directory",
               "load_skill", "todo_write", "remember")
+PLAN_TOOLS = tuple(t for t in READ_TOOLS if t != "todo_write") + (
+    "request_plan_clarification", "submit_implementation_plan")
 
 _CONVERSATIONAL_RULE = (
     "Greetings, questions about your capabilities, and casual conversation "
@@ -49,17 +51,16 @@ PROFILES: dict[str, V2Profile] = {
             "the code that the request touches, then produce a grounded "
             "implementation plan — WITHOUT modifying anything.\n"
             + _CITE_RULE +
-            "The plan must contain: (1) a short problem statement, (2) "
-            "ordered steps, each naming the exact files to change and "
-            "what changes, (3) how the work will be verified (real "
-            "commands), and (4) risks or open questions.\n"
-            "Once you have read enough to ground the plan, deliver the "
-            "ENTIRE plan as your final plain-text message — no tool calls "
-            "in or after it — and end by suggesting a switch to Agent "
-            "mode to execute it."),
+            "Ask only material questions that repository inspection cannot "
+            "answer, using request_plan_clarification. Otherwise submit the "
+            "entire plan with submit_implementation_plan. Include current "
+            "findings, exact files and operations, ordered phases and tasks, "
+            "real validation commands, risks, and a definition of done. "
+            "Do not print the plan as loose prose and never approve it "
+            "yourself; the user must approve the persisted revision."),
         # No todo_write: the plan IS the deliverable, not a live task
         # list, and letting planners write todos invites repeat loops.
-        tools=tuple(t for t in READ_TOOLS if t != "todo_write"),
+        tools=PLAN_TOOLS,
         max_turns=12,
     ),
     "ask": V2Profile(
@@ -157,7 +158,7 @@ def get_v2_profile(mode: str) -> V2Profile:
         raise ValueError(f"Unknown mode: {mode!r}") from exc
 
 
-def build_belt_for(profile: V2Profile) -> ToolBelt:
+def build_belt_for(profile: V2Profile, *, include_planning: bool = False) -> ToolBelt:
     """Return the tool belt for a profile — structural least privilege.
 
     User-disabled tools (settings → NEXCODER_DISABLED_TOOLS) are removed
@@ -169,7 +170,8 @@ def build_belt_for(profile: V2Profile) -> ToolBelt:
                 os.getenv("NEXCODER_DISABLED_TOOLS", "").split(",")
                 if name.strip()}
     disabled -= {"read_file", "glob", "grep", "list_directory"}
-    full = build_default_belt()
+    full = build_default_belt(
+        include_planning=include_planning or profile.name == "plan")
     names = full.names if profile.tools is None else profile.tools
     belt = ToolBelt()
     for name in names:

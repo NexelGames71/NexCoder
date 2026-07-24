@@ -1,7 +1,7 @@
 from nexcoder.agent.core.belt_factory import build_default_belt
 from nexcoder.agent.core.events import AgentEvent
 from nexcoder.agent.core.loop import AgentLoop
-from nexcoder.agent.core.transport import XmlAdapter
+from nexcoder.agent.core.transport import NativeAdapter, XmlAdapter
 
 
 class FakeModel:
@@ -115,6 +115,77 @@ def test_loop_feeds_parse_errors_back(tmp_path):
     assert any("valid JSON" in str(m.get("content")) for m in correction)
 
 
+def test_native_parse_error_does_not_leave_dangling_tool_call(tmp_path):
+    model = FakeModel([
+        {
+            "role": "assistant",
+            "content": "private reasoning</think>",
+            "tool_calls": [{
+                "id": "call_bad",
+                "type": "function",
+                "function": {"name": "write_file", "arguments": '{"path":'},
+            }],
+        },
+        {"role": "assistant", "content": "Recovered cleanly."},
+    ])
+    loop = AgentLoop(
+        project_root=tmp_path, model=model, adapter=NativeAdapter(),
+        belt=build_default_belt(), system_prompt="test")
+
+    result = loop.run("create a file")
+
+    assert result["status"] == "completed"
+    retry_payload = model.received[1]
+    assert not any(message.get("tool_calls") for message in retry_payload)
+    assert any("100 lines" in str(message.get("content"))
+               for message in retry_payload)
+
+
+def test_loop_resumes_complete_native_tool_history(tmp_path):
+    prior = [
+        {"role": "system", "content": "old system"},
+        {"role": "user", "content": "inspect config.py"},
+        {"role": "assistant", "content": "thoughts</think>", "tool_calls": [{
+            "id": "call_read", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path":"config.py"}'},
+        }]},
+        {"role": "tool", "tool_call_id": "call_read",
+         "content": '{"success":true,"content":"PORT=8000"}'},
+    ]
+    model = FakeModel([{"role": "assistant", "content": "Continued without rereading."}])
+    loop = AgentLoop(
+        project_root=tmp_path, model=model, adapter=NativeAdapter(),
+        belt=build_default_belt(), system_prompt="new system")
+
+    result = loop.run("now change the port", resume_messages=prior)
+
+    assert result["status"] == "completed"
+    payload = model.received[0]
+    assert [message["role"] for message in payload] == [
+        "system", "user", "assistant", "tool", "user"]
+    assert payload[2]["content"] == ""
+    assert payload[-1]["content"] == "now change the port"
+
+
+def test_loop_sends_image_attachment_as_multimodal_user_content(tmp_path):
+    import base64
+
+    data_url = "data:image/png;base64," + base64.b64encode(
+        bytes.fromhex("89504e470d0a1a0a")).decode()
+    model = FakeModel([{"role": "assistant", "content": "I can see the UI bug."}])
+    loop, _ = make_loop(tmp_path, model)
+
+    result = loop.run("Fix this screenshot", input_attachments=[{
+        "name": "bug.png", "data_url": data_url,
+    }])
+
+    assert result["status"] == "completed"
+    content = model.received[0][-1]["content"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "image_url"
+
+
 def test_loop_duplicate_calls_blocked_then_stalls(tmp_path):
     (tmp_path / "f.txt").write_text("hi", encoding="utf-8")
     same = xml_call("read_file", '{"path": "f.txt"}')
@@ -132,6 +203,23 @@ def test_loop_max_turns(tmp_path):
     loop, _ = make_loop(tmp_path, model, max_turns=3)
     result = loop.run("never finish")
     assert result["status"] == "max_turns" and result["turns"] == 3
+    assert result["final_text"]
+
+
+def test_loop_synthesizes_a_handoff_after_the_operational_turn_limit(tmp_path):
+    model = FakeModel([
+        xml_call("read_file", '{"path": "missing-1.txt"}'),
+        xml_call("read_file", '{"path": "missing-2.txt"}'),
+        {"role": "assistant", "content":
+         "I inspected both candidate paths; neither exists. The entry point is still unknown."},
+    ])
+    loop, _ = make_loop(tmp_path, model, max_turns=2)
+    result = loop.run("find the entry point")
+    assert result["status"] == "max_turns"
+    assert "entry point is still unknown" in result["final_text"]
+    final_request = model.received[-1]
+    assert final_request[-1]["role"] == "user"
+    assert "Do not call tools" in final_request[-1]["content"]
 
 
 def test_loop_nudges_only_when_code_fences_replace_tool_calls(tmp_path):
@@ -246,3 +334,34 @@ def test_loop_todo_state_in_result(tmp_path):
     loop, _ = make_loop(tmp_path, model)
     result = loop.run("plan it")
     assert result["todos"][0]["content"] == "step 1"
+
+
+def test_loop_applies_late_user_steering_before_completing(tmp_path):
+    model = FakeModel([
+        {"role": "assistant", "content": "Initial answer."},
+        {"role": "assistant", "content": "Updated answer after follow-up."},
+    ])
+    reads = 0
+
+    def steering_source():
+        nonlocal reads
+        reads += 1
+        # First check is at the turn boundary. The second simulates a prompt
+        # arriving while the first model response is streaming.
+        return ["Also cover the tests."] if reads == 2 else []
+
+    loop, events = make_loop(
+        tmp_path, model, steering_source=steering_source)
+    result = loop.run("Explain the change")
+
+    assert result["status"] == "completed"
+    assert result["final_text"] == "Updated answer after follow-up."
+    assert any(
+        message.get("role") == "user"
+        and "Also cover the tests." in str(message.get("content"))
+        for message in model.received[1]
+    )
+    steering_events = [event for event in events
+                       if event.type == "steering_applied"]
+    assert len(steering_events) == 1
+    assert steering_events[0].payload["text"] == "Also cover the tests."

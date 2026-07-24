@@ -189,6 +189,13 @@ export const useMeshStore = create<MeshState>((set) => ({
         }
         return updates;
       }
+      case 'agent_degraded':
+        return {
+          timeline: pushTimeline(state.timeline, {
+            ts: Date.now(), agentId: payload.agent_id, kind: 'warn',
+            text: payload.summary || 'Continuing with an unavailable dependency handoff',
+          }),
+        };
       case 'agent_completed': {
         const agent = state.agents[payload.agent_id];
         if (!agent) return {};

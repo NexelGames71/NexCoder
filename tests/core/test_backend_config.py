@@ -6,7 +6,7 @@ def test_defaults(monkeypatch):
                 "NEXCODER_ADAPTER", "NEXA_CONTEXT_WINDOW"):
         monkeypatch.delenv(var, raising=False)
     config = load_backend_config()
-    assert config.base_url == "http://127.0.0.1:8002"
+    assert config.base_url == "https://integrate.api.nvidia.com/v1"
     assert config.adapter == "xml"
     assert config.context_window == 32768
 

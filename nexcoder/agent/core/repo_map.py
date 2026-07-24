@@ -11,9 +11,13 @@ from typing import Any
 
 from nexcoder.agent.core.walk import iter_project_files
 
-MAX_FILES = 400
+MAX_FILES = 800
 MAX_SYMBOLS = 20
-SOURCE_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
+SOURCE_EXTENSIONS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".java", ".kt", ".kts", ".go", ".rs", ".cs", ".cpp", ".cc",
+    ".c", ".h", ".hpp", ".rb", ".php", ".swift", ".vue", ".svelte",
+}
 JS_SYMBOL_PATTERN = re.compile(
     r"^\s*(?:export\s+)?(?:default\s+)?"
     r"(?:(class)\s+([A-Za-z_$][\w$]*)|(?:async\s+)?(function)\s+([A-Za-z_$][\w$]*))",

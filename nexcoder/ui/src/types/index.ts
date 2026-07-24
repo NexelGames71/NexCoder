@@ -16,6 +16,8 @@ export interface OpenFile {
   isDirty: boolean;
   cursorLine?: number;
   cursorColumn?: number;
+  kind?: 'file' | 'implementation_plan' | 'artifact';
+  resourceId?: string;
 }
 
 export interface EditorGroup {
@@ -31,7 +33,35 @@ export interface ChatMessage {
   timestamp: number;
   mode?: AgentMode;
   isStreaming?: boolean;
+  attachments?: PromptAttachment[];
+  /** Stable UI identifier persisted with the prompt for safe rewind/resend. */
+  clientPromptId?: string;
+  /** Position in the persisted session transcript. */
+  sessionMessageIndex?: number;
+  /** True when this prompt was injected into an already-running agent turn. */
+  isSteering?: boolean;
 }
+
+export interface ImageAttachment {
+  kind?: 'image';
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  /** Present for a new/live prompt; omitted from persisted chat history. */
+  dataUrl?: string;
+}
+
+export interface TextAttachment {
+  kind: 'text';
+  id: string;
+  name: string;
+  mimeType: 'text/plain';
+  size: number;
+  path: string;
+}
+
+export type PromptAttachment = ImageAttachment | TextAttachment;
 
 export interface SessionMetadata {
   session_id: string;
@@ -44,6 +74,68 @@ export interface SessionMetadata {
   status: 'active' | 'complete' | 'cancelled' | 'error' | string;
   tags: string[];
   archived?: boolean;
+  plan_id?: string;
+}
+
+export type PlanStatus =
+  | 'idle' | 'clarifying' | 'drafting' | 'awaiting_approval'
+  | 'revision_requested' | 'approved' | 'executing' | 'paused'
+  | 'completed' | 'cancelled' | 'failed';
+
+export interface ClarificationOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface ClarificationQuestion {
+  id: string;
+  title: string;
+  kind: 'single' | 'multiple' | 'boolean' | 'text' | 'number' | 'file' | 'confirm';
+  explanation?: string;
+  options: ClarificationOption[];
+  required: boolean;
+  answer?: unknown;
+}
+
+export interface PlanTask {
+  id: string;
+  title: string;
+  description?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'skipped' | 'failed';
+}
+
+export interface PlanPhase {
+  id: string;
+  title: string;
+  description?: string;
+  status: PlanTask['status'];
+  tasks: PlanTask[];
+}
+
+export interface ImplementationPlan {
+  id: string;
+  conversation_id: string;
+  task_id?: string;
+  title: string;
+  objective: string;
+  original_request: string;
+  project_name?: string;
+  status: PlanStatus;
+  revision: number;
+  questions: ClarificationQuestion[];
+  proposed_architecture?: string[];
+  phases: PlanPhase[];
+  files: Array<{ path: string; operation: string; description: string; confirmed: boolean }>;
+  risks: Array<{ title: string; mitigation: string; severity: string }>;
+  validation_steps: Array<{ description: string; command?: string; status: string }>;
+  markdown_content: string;
+  revisions: Array<{ revision: number; summary: string; created_at: string }>;
+  deviations: Array<{ id: string; classification: string; description: string; proposed_amendment?: string }>;
+  approved_at?: string;
+  saved_markdown_path?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface StoredSessionMessage {
@@ -80,16 +172,27 @@ export interface FinalAnswer {
 }
 
 export interface AgentArtifact {
+  id: string;
+  runId: string;
+  projectPath: string;
   type:
-    | 'final_answer'
-    | 'patch_proposal'
-    | 'approval_request'
+    | 'run_summary'
+    | 'patch_summary'
     | 'validation_report'
+    | 'problem_fix_report'
+    | 'review_report'
     | 'failure_report'
-    | 'scan_report';
-  title?: string;
-  summary?: string;
-  data?: Record<string, any>;
+    | 'scan_report'
+    | 'implementation_plan';
+  title: string;
+  summary: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'draft' | 'generated' | 'saved';
+  files: string[];
+  savedPath?: string;
+  sourcePrompt?: string;
 }
 
 export interface Skill {
@@ -175,8 +278,12 @@ export interface DiffHunk {
 export interface TerminalSession {
   id: string;
   cwd: string;
-  isActive: boolean;
+  isActive?: boolean;
   name?: string;
+  shell?: string;
+  status: 'starting' | 'running' | 'closing' | 'exited' | 'error';
+  exitCode?: number | null;
+  error?: string;
 }
 
 export interface Project {

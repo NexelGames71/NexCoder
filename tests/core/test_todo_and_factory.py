@@ -11,7 +11,7 @@ def test_default_belt_has_all_tools():
     belt = build_default_belt()
     assert set(belt.names) == {
         "read_file", "edit_file", "write_file", "create_directory", "move_path",
-        "list_directory", "glob", "grep", "run_command", "todo_write",
+        "list_directory", "glob", "grep", "code_search", "run_command", "todo_write",
         "load_skill", "remember"}
 
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { EditorTheme } from '../services/theme';
 
 /**
  * Editor *settings* — what the user sees and types in the editor
@@ -12,7 +13,7 @@ import { create } from 'zustand';
  * in the TopBar.
  */
 export interface EditorSettings {
-  theme: 'nexcoder' | 'vs-dark' | 'light' | 'hc-black' | 'dark-plus' | 'github-dark' | 'vs';
+  theme: EditorTheme;
   fontSize: number;
   wordWrap: 'on' | 'off';
   minimap: boolean;
@@ -85,7 +86,9 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) };
+        const loaded = { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+        return loaded;
       }
       // One-time migration: pull editor fields out of the legacy
       // ``nexcoder_settings`` blob. Existing users keep their
@@ -99,8 +102,11 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set) => ({
             (migrated as Record<string, unknown>)[key] = parsed[key];
           }
         }
-        return { ...DEFAULT_EDITOR_SETTINGS, ...migrated };
+        const loaded = { ...DEFAULT_EDITOR_SETTINGS, ...migrated };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+        return loaded;
       }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_EDITOR_SETTINGS));
       return DEFAULT_EDITOR_SETTINGS;
     } catch {
       return DEFAULT_EDITOR_SETTINGS;

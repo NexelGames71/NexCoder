@@ -39,7 +39,9 @@ def load_backend_config() -> BackendConfig:
         name.strip() for name in
         os.getenv("NEXCODER_DISABLED_TOOLS", "").split(",") if name.strip())
     return BackendConfig(
-        base_url=os.getenv("NEXA_API_URL", "http://127.0.0.1:8002"),
+        base_url=os.getenv(
+            "NEXA_API_URL", "https://integrate.api.nvidia.com/v1"
+        ),
         model=os.getenv("NEXA_MODEL", "default"),
         api_key=os.getenv("NEXA_API_KEY", ""),
         adapter=os.getenv("NEXCODER_ADAPTER", "xml"),

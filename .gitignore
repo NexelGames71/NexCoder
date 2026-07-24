@@ -27,6 +27,12 @@ env/
 # NexCoder local data
 .nexcoder/
 
+# Local agent / IDE scratch
+.agents/
+.claude/
+.diag-scratch/
+.pytest_cache/
+
 # Node / React frontend
 nexcoder/ui/node_modules/
 nexcoder/ui/dist/

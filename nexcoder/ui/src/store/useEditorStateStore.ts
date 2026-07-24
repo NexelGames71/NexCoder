@@ -185,6 +185,8 @@ export const useEditorStateStore = create<EditorState>((set, get) => ({
     }),
 }));
 
+const EMPTY_OPEN_FILES: OpenFile[] = [];
+
 /** Convenience selectors that match the previous ``useEditorStore`` shape
  *  so older call sites keep working while we migrate them. */
 export const selectActiveFile = (state: EditorState): OpenFile | null => {
@@ -195,7 +197,7 @@ export const selectActiveFile = (state: EditorState): OpenFile | null => {
 
 export const selectOpenFiles = (state: EditorState): OpenFile[] => {
   const group = state.editorGroups.find((g) => g.id === state.activeGroupId);
-  return group ? group.openFiles : [];
+  return group ? group.openFiles : EMPTY_OPEN_FILES;
 };
 
 export const selectActiveFileOrAny = (state: EditorState): OpenFile | null => {

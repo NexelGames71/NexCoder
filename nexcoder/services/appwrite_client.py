@@ -33,7 +33,6 @@ class AppwriteClient:
 
         self._endpoint = os.getenv("APPWRITE_ENDPOINT", "")
         self._project_id = os.getenv("APPWRITE_PROJECT_ID", "")
-        self._api_key = os.getenv("APPWRITE_API_KEY", "")
         self._database_id = os.getenv("APPWRITE_DATABASE_ID", "")
 
         if self._endpoint and self._project_id:
@@ -50,8 +49,10 @@ class AppwriteClient:
             self._client.set_endpoint(self._endpoint)
             self._client.set_project(self._project_id)
 
-            if self._api_key:
-                self._client.set_key(self._api_key)
+            # This is a distributed desktop client. Never attach an Appwrite
+            # server API key here; authorization must come from the signed-in
+            # user's session and collection permissions. Privileged work
+            # belongs behind a Nexa service endpoint.
 
             self._databases = Databases(self._client)
             self._account = Account(self._client)

@@ -1,13 +1,15 @@
 import React from 'react';
-import { FolderOpen, Plus, FolderPlus, RefreshCw, LocateFixed, FileText } from 'lucide-react';
+import { FolderOpen, Plus, FolderPlus, RefreshCw, LocateFixed, FileText, GitBranch } from 'lucide-react';
 import { useProjectStore } from '../../store/useProjectStore';
-import { createDirectory, createFile, getFileTree, openFolderDialog, openFileDialog, spawnTerminal } from '../../services/bridge';
+import { createDirectory, createFile, getFileTree, openFolderDialog, openFileDialog, readFile } from '../../services/bridge';
 import FileTreeItem from './FileTreeItem';
 import { selectActiveFile, useEditorStateStore } from '../../store/useEditorStateStore';
 import { FileNode } from '../../types';
 import ExplorerContextMenu, { ExplorerMenuAction } from './ExplorerContextMenu';
 import ExplorerNameDialog from './ExplorerNameDialog';
 import { getLanguageFromExtension } from '../../utils/languageMap';
+import { getFilePreviewKind } from '../../utils/fileIcons';
+import CloneRepositoryDialog from '../Editor/CloneRepositoryDialog';
 
 export default function FileExplorer() {
   const { fileTree, projectPath, setFileTree, setLoading } = useProjectStore();
@@ -16,6 +18,7 @@ export default function FileExplorer() {
   const [filter, setFilter] = React.useState('');
   const [revealedPaths, setRevealedPaths] = React.useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [showCloneDialog, setShowCloneDialog] = React.useState(false);
   const [nameDialog, setNameDialog] = React.useState<{
     title: string;
     label: string;
@@ -39,13 +42,25 @@ export default function FileExplorer() {
     try {
       const filePath = await openFileDialog();
       if (filePath) {
-        // Open the file in the editor
         const fileName = filePath.split(/[\\/]/).pop() || 'file';
+        const extension = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')) : '';
+        const previewKind = getFilePreviewKind(filePath);
+        if (previewKind !== 'text') {
+          openFile({
+            path: filePath,
+            name: fileName,
+            content: '',
+            language: 'plaintext',
+            isDirty: false,
+          });
+          return;
+        }
+        const res: any = await readFile(filePath);
         openFile({
           path: filePath,
           name: fileName,
-          content: '',
-          language: getLanguageFromExtension(fileName.includes('.') ? `.${fileName.split('.').pop()}` : ''),
+          content: res?.success ? res.content : '',
+          language: getLanguageFromExtension(extension),
           isDirty: false,
         });
       }
@@ -132,7 +147,7 @@ export default function FileExplorer() {
       return;
     }
     if (action === 'open-terminal') {
-      await spawnTerminal(projectPath);
+      window.nexcoder?.newTerminal(projectPath);
       return;
     }
     if (action === 'refresh') {
@@ -183,7 +198,13 @@ export default function FileExplorer() {
           <button className="btn btn-primary" onClick={handleOpenFile} style={{ justifyContent: 'flex-start', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
             <FileText size={14} /> Open File
           </button>
+          <button className="btn btn-primary" onClick={() => setShowCloneDialog(true)} style={{ justifyContent: 'flex-start', padding: 'var(--space-1) var(--space-2)', fontSize: 'var(--font-size-xs)' }}>
+            <GitBranch size={14} /> Clone Repository
+          </button>
         </div>
+        {showCloneDialog && (
+          <CloneRepositoryDialog onClose={() => setShowCloneDialog(false)} />
+        )}
       </div>
     );
   }
@@ -201,6 +222,9 @@ export default function FileExplorer() {
           </button>
           <button className="btn btn-ghost btn-icon tooltip" data-tooltip="Open File" onClick={handleOpenFile}>
             <FileText size={12} />
+          </button>
+          <button className="btn btn-ghost btn-icon tooltip" data-tooltip="Clone Repository" onClick={() => setShowCloneDialog(true)}>
+            <GitBranch size={12} />
           </button>
           <button className="btn btn-ghost btn-icon tooltip" data-tooltip="New File" onClick={() => createAtRoot('file')}>
             <Plus size={12} />
@@ -251,6 +275,9 @@ export default function FileExplorer() {
             setNameDialog(null);
           }}
         />
+      )}
+      {showCloneDialog && (
+        <CloneRepositoryDialog onClose={() => setShowCloneDialog(false)} />
       )}
     </div>
   );

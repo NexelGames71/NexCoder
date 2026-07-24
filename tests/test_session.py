@@ -207,6 +207,39 @@ class AgentSessionStoreTests(unittest.TestCase):
         contents = [m.content for m in it]
         self.assertEqual(contents, [f"msg {i}" for i in range(5)])
 
+    def test_truncate_messages_keeps_only_selected_prefix(self):
+        meta = self.store.create_session(title="New session")
+        for role, content in [
+            ("user", "first"), ("assistant", "done"),
+            ("user", "second"), ("assistant", "done again"),
+        ]:
+            self.store.append_message(meta.session_id, role, content)
+
+        retained = self.store.truncate_messages(meta.session_id, 2)
+
+        loaded_meta, loaded = self.store.load_session(meta.session_id)
+        self.assertEqual([message.content for message in retained], ["first", "done"])
+        self.assertEqual([message.content for message in loaded], ["first", "done"])
+        self.assertEqual(loaded_meta.message_count, 2)
+        self.assertEqual(loaded_meta.status, "active")
+
+    def test_truncate_messages_to_empty_resets_default_title(self):
+        meta = self.store.create_session(title="New session")
+        self.store.append_message(meta.session_id, "user", "old branch")
+
+        self.store.truncate_messages(meta.session_id, 0)
+        loaded_meta, loaded = self.store.load_session(meta.session_id)
+
+        self.assertEqual(loaded, [])
+        self.assertEqual(loaded_meta.message_count, 0)
+        self.assertEqual(loaded_meta.title, "New session")
+
+    def test_truncate_messages_rejects_out_of_range_boundary(self):
+        meta = self.store.create_session()
+        self.store.append_message(meta.session_id, "user", "hello")
+        with self.assertRaises(ValueError):
+            self.store.truncate_messages(meta.session_id, 2)
+
     # ── index persistence ────────────────────────────────────────────
 
     def test_index_file_is_rewritten_on_change(self):

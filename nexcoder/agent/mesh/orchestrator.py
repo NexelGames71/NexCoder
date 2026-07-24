@@ -128,23 +128,34 @@ class MeshOrchestrator:
             for unit in units:
                 self.cancel_token.raise_if_cancelled()
 
-                failed_deps = [d for d in unit.dependencies
-                               if by_id[d].status not in ("completed",)]
-                if failed_deps:
-                    unit.status = "blocked"
-                    self.emit("agent_completed", {
-                        "mesh_id": mesh_id, "agent_id": unit.id,
-                        "status": "blocked",
-                        "summary": f"Blocked: dependency {failed_deps[0]} "
-                                   "did not complete."})
-                    continue
-                if turns_used >= self.total_turn_budget:
+                unavailable_deps = [d for d in unit.dependencies
+                                    if by_id[d].status != "completed"]
+                remaining_turns = self.total_turn_budget - turns_used
+                if remaining_turns <= 0:
                     unit.status = "blocked"
                     self.emit("agent_completed", {
                         "mesh_id": mesh_id, "agent_id": unit.id,
                         "status": "blocked",
                         "summary": "Blocked: mesh turn budget exhausted."})
                     continue
+
+                # A failed scout or test is a degraded handoff, not a reason
+                # to abandon the entire goal. Every specialist can inspect the
+                # current project state and make independent progress. Only a
+                # cancellation or the global resource budget is a hard stop.
+                if unavailable_deps:
+                    dependency_details = ", ".join(
+                        f"{dep} ({by_id[dep].status})"
+                        for dep in unavailable_deps)
+                    degraded = (
+                        "Dependency handoff unavailable: " + dependency_details
+                        + ". Inspect the current project state yourself and "
+                          "continue with the work that is still possible.")
+                    handoffs.append(f"[Orchestrator] {degraded}")
+                    self.emit("agent_degraded", {
+                        "mesh_id": mesh_id, "agent_id": unit.id,
+                        "dependencies": unavailable_deps,
+                        "summary": degraded})
 
                 unit.status = "running"
                 role = get_role(unit.role)
@@ -153,7 +164,8 @@ class MeshOrchestrator:
                     "role": unit.role, "display_name": role.display_name,
                     "title": unit.title})
 
-                result = self._run_unit(mesh_id, unit, goal, handoffs)
+                result = self._run_unit(
+                    mesh_id, unit, goal, handoffs, remaining_turns)
                 results.append(result)
                 turns_used += result.turns
                 unit.status = result.status if result.status in (
@@ -210,7 +222,7 @@ class MeshOrchestrator:
         return summary
 
     def _run_unit(self, mesh_id: str, unit: WorkUnit, goal: str,
-                  handoffs: list[str]) -> MeshAgentResult:
+                  handoffs: list[str], remaining_turns: int) -> MeshAgentResult:
         role = get_role(unit.role)
 
         def forward(event: Any) -> None:
@@ -241,8 +253,7 @@ class MeshOrchestrator:
             trajectory_mode=f"mesh-{role.name}",
             emit=forward,
             permission_gate=self.permission_gate,
-            max_turns=min(role.max_turns,
-                          max(4, self.total_turn_budget)),
+            max_turns=max(1, min(role.max_turns, remaining_turns)),
             context_window=self.context_window,
             extra_system=self.extra_system,
             session_store=None,
@@ -259,9 +270,13 @@ class MeshOrchestrator:
                                    status="failed", summary=str(exc)[:500])
         status = "completed" if result.get("success") else (
             "cancelled" if result.get("status") == "cancelled" else "failed")
+        summary = str(result.get("final_text") or "").strip()
+        if not summary:
+            summary = (f"{role.display_name} ended with status "
+                       f"{result.get('status') or 'failed'} and produced no handoff.")
         return MeshAgentResult(
             unit_id=unit.id, role=unit.role, status=status,
-            summary=str(result.get("final_text") or ""),
+            summary=summary,
             mutated_files=list(result.get("mutated_files") or []),
             turns=int(result.get("turns") or 0),
             checkpoint_id=result.get("checkpoint_id"),

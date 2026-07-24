@@ -7,6 +7,7 @@ import {
 import { useEditorSettingsStore } from '../../store/useEditorSettingsStore';
 import { useAgentStore } from '../../store/useAgentStore';
 import { useProjectStore } from '../../store/useProjectStore';
+import type { EditorTheme } from '../../services/theme';
 import {
   getActiveRules, getProjectMemory, listAgentPermissions, lspStatus,
   removeAgentPermission, saveProjectMemory, testModelConnection,
@@ -165,7 +166,7 @@ export default function SettingsPage({ onClose, initialTab = 'editor' }: Setting
       description: 'Choose the color theme for the editor.',
       control: (
         <select className="input" value={editor.settings.theme}
-          onChange={(e) => editor.updateSetting('theme', e.target.value as 'nexcoder' | 'vs-dark' | 'light' | 'hc-black' | 'dark-plus' | 'github-dark' | 'vs')}>
+          onChange={(e) => editor.updateSetting('theme', e.target.value as EditorTheme)}>
           <option value="nexcoder">NexCoder Dark</option>
           <option value="vs-dark">VS Dark</option>
           <option value="light">Light</option>

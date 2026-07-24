@@ -1,33 +1,44 @@
-import React, { useState } from 'react';
-import { Files, Search, GitBranch, Play, MessageSquareText, ListChecks, Network } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Files, Search, GitBranch, ListChecks, Network, Puzzle } from 'lucide-react';
 import FileExplorer from './FileExplorer';
 import SearchPanel from './SearchPanel';
 import GitPanel from './GitPanel';
 import TasksPanel from './TasksPanel';
-import ChatHistoryPanel from './ChatHistoryPanel';
 import MeshPanel from './MeshPanel';
+import ExtensionsPanel from './ExtensionsPanel';
 import './Sidebar.css';
 
 interface SidebarProps {
   isCollapsed: boolean;
 }
 
-type TabId = 'explorer' | 'search' | 'git' | 'run' | 'chats' | 'tasks' | 'mesh';
+type TabId = 'explorer' | 'search' | 'git' | 'extensions' | 'tasks' | 'mesh';
 
-// Activity bar order: Explorer, Search, Source Control, Run, Chats,
-// Agent Tasks, Agent Mesh.
+// Activity bar order: Explorer, Search, Source Control, Extensions,
+// Agent Tasks, Agent Mesh. Chat history lives in the AI panel.
 const TABS: { id: TabId; icon: any; title: string }[] = [
   { id: 'explorer', icon: Files, title: 'Explorer' },
   { id: 'search', icon: Search, title: 'Search' },
   { id: 'git', icon: GitBranch, title: 'Source Control' },
-  { id: 'run', icon: Play, title: 'Run' },
-  { id: 'chats', icon: MessageSquareText, title: 'Chats' },
+  { id: 'extensions', icon: Puzzle, title: 'Extensions' },
   { id: 'tasks', icon: ListChecks, title: 'Agent Tasks' },
   { id: 'mesh', icon: Network, title: 'Agent Mesh' },
 ];
 
 export default function Sidebar({ isCollapsed }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<TabId>('explorer');
+
+  useEffect(() => {
+    const validTabs = new Set(TABS.map((tab) => tab.id));
+    const handleShowTab = (event: Event) => {
+      const tabId = String((event as CustomEvent<{ tabId?: string }>).detail?.tabId || 'explorer');
+      if (validTabs.has(tabId as TabId)) {
+        setActiveTab(tabId as TabId);
+      }
+    };
+    window.addEventListener('nexcoder:show-sidebar-tab', handleShowTab);
+    return () => window.removeEventListener('nexcoder:show-sidebar-tab', handleShowTab);
+  }, []);
 
   if (isCollapsed) return null;
 
@@ -39,11 +50,10 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
         return <SearchPanel />;
       case 'git':
         return <GitPanel />;
-      case 'run':
+      case 'extensions':
+        return <ExtensionsPanel />;
       case 'tasks':
         return <TasksPanel />;
-      case 'chats':
-        return <ChatHistoryPanel />;
       case 'mesh':
         return <MeshPanel />;
       default:

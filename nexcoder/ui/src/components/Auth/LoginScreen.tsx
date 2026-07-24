@@ -1,141 +1,80 @@
-import React, { useState } from 'react';
-import { X, Mail, Lock, User, Loader2 } from 'lucide-react';
-import { appwriteLogin, appwriteRegister } from '../../services/bridge';
+import React, { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react';
+import { startWebAuthLogin } from '../../services/bridge';
 import './LoginScreen.css';
 
 interface LoginScreenProps {
   onClose: () => void;
-  onLoginSuccess: (user: any) => void;
+  authError?: string | null;
 }
 
-export default function LoginScreen({ onClose, onLoginSuccess }: LoginScreenProps) {
-  const [isRegister, setIsRegister] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+export default function LoginScreen({ onClose, authError }: LoginScreenProps) {
   const [loading, setLoading] = useState(false);
+  const [loginUrl, setLoginUrl] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) return;
-
+  const startLogin = useCallback(async () => {
     setLoading(true);
     setError('');
-
     try {
-      const result = isRegister
-        ? await appwriteRegister(email, password, name)
-        : await appwriteLogin(email, password);
-
+      const result = await startWebAuthLogin();
       if (!result?.success) {
-        setError(result?.error || 'Authentication failed');
+        setError(result?.error || 'Could not start web login.');
         return;
       }
-
-      const user = result.user || result.session || {};
-      onLoginSuccess({
-        id: user.$id || user.userId || email,
-        email: user.email || email,
-        name: user.name || name || email.split('@')[0],
-      });
-      onClose();
+      setLoginUrl(result.url || '');
+      if (result.opened === false) {
+        setError('Your browser did not open automatically. Use the button below.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void startLogin();
+  }, [startLogin]);
 
   return (
     <div className="login-overlay">
       <div className="login-container">
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}>
+        <div className="login-close-row">
+          <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close login">
             <X size={16} />
           </button>
         </div>
 
         <div className="login-header">
           <div className="login-logo">N</div>
-          <h2 style={{ fontSize: 'var(--font-size-xl)', fontWeight: '700', color: 'var(--text-primary)' }}>
-            {isRegister ? 'Create Nexa Account' : 'Sign in to Nexa'}
-          </h2>
-          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)' }}>
-            Sync your workspaces, agent tasks, and chat history.
+          <h2 className="login-title">Sign in on NexCoder Web</h2>
+          <p className="login-subtitle">
+            Complete login in your browser. NexCoder will return here automatically when authentication finishes.
           </p>
         </div>
 
-        {error && (
-          <div style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', fontSize: 'var(--font-size-xs)' }}>
-            {error}
+        {(error || authError) && (
+          <div className="login-error" role="alert">
+            {authError || error}
           </div>
         )}
 
-        <form className="login-form" onSubmit={handleSubmit}>
-          {isRegister && (
-            <div className="form-group">
-              <label className="form-label">Full Name</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="John Doe"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  style={{ paddingLeft: 'var(--space-6)' }}
-                />
-                <User size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              </div>
-            </div>
+        <div className="login-web-status">
+          {loading ? <Loader2 size={16} className="spin" /> : <CheckCircle2 size={16} />}
+          <span>{loading ? 'Opening NexCoder Web...' : 'Waiting for browser login callback'}</span>
+        </div>
+
+        <div className="login-web-actions">
+          <button className="btn btn-primary w-full" type="button" onClick={() => void startLogin()} disabled={loading}>
+            {loading ? <Loader2 size={14} className="spin" /> : <ExternalLink size={14} />}
+            Open NexCoder Web
+          </button>
+          {loginUrl && (
+            <a className="login-url" href={loginUrl} target="_blank" rel="noreferrer">
+              {loginUrl}
+            </a>
           )}
-
-          <div className="form-group">
-            <label className="form-label">Email Address</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                className="input"
-                type="email"
-                placeholder="you@nexa.ai"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={{ paddingLeft: 'var(--space-6)' }}
-              />
-              <Mail size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                className="input"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{ paddingLeft: 'var(--space-6)' }}
-              />
-              <Lock size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-            </div>
-          </div>
-
-          <button className="btn btn-primary w-full" type="submit" disabled={loading} style={{ marginTop: 'var(--space-2)' }}>
-            {loading ? <Loader2 size={14} className="spin" /> : (isRegister ? 'Sign Up' : 'Sign In')}
-          </button>
-        </form>
-
-        <div style={{ textAlign: 'center', fontSize: 'var(--font-size-xs)' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>
-            {isRegister ? 'Already have an account? ' : "Don't have an account? "}
-          </span>
-          <button
-            className="btn btn-ghost"
-            onClick={() => setIsRegister(!isRegister)}
-            style={{ padding: 0, textDecoration: 'underline', color: 'var(--accent-purple)', fontSize: 'var(--font-size-xs)' }}
-          >
-            {isRegister ? 'Sign In' : 'Sign Up'}
-          </button>
         </div>
       </div>
     </div>

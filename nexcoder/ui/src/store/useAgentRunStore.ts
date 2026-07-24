@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { PromptAttachment } from '../types';
 
 export interface AgentTodo { id: number; content: string; status: 'pending' | 'in_progress' | 'completed'; }
 export interface PermissionReq { id: string; tool: string; command: string; }
@@ -9,6 +10,7 @@ export interface AgentEventMsg { type: string; payload: Record<string, any>; ts?
 export type TranscriptItem =
   | { kind: 'text'; text: string }
   | { kind: 'notice'; text: string }
+  | { kind: 'steer'; id: string; text: string; attachments: PromptAttachment[] }
   | { kind: 'step'; tool: string; args?: Record<string, unknown>; done: boolean;
       success?: boolean; summary?: string;
       output?: string[];   // streamed command output lines
@@ -46,6 +48,10 @@ interface AgentRunState {
   // Latest usage across runs — feeds the persistent composer meter.
   lastContextUsage: ContextUsage | null;
   start: (runId: string) => void;
+  addSteeringPrompt: (runId: string, prompt: {
+    id: string; text: string; attachments: PromptAttachment[];
+  }) => void;
+  removeRuns: (runIds: string[]) => void;
   handleEvent: (event: AgentEventMsg) => void;
   reset: () => void;
 }
@@ -137,6 +143,12 @@ function applyEvent(run: AgentRun, event: AgentEventMsg): AgentRun {
         : 'Context compacted to fit the model window';
       return { ...run, transcript: [...run.transcript, { kind: 'notice', text }] };
     }
+    case 'steering_applied': {
+      // The UI inserts the complete steering prompt (including image data)
+      // after the backend accepts it. This acknowledgement must not create a
+      // second, lossy "Steered: ..." transcript line.
+      return run;
+    }
     case 'permission_request':
       return { ...run, permission: { id: payload.id, tool: payload.tool, command: payload.command } };
     case 'permission_resolved': return { ...run, permission: null };
@@ -186,6 +198,38 @@ export const useAgentRunStore = create<AgentRunState>((set) => ({
     runs: { ...state.runs, [runId]: emptyRun() },
     activeRunId: runId,
   })),
+  addSteeringPrompt: (runId, prompt) => set((state) => {
+    const run = state.runs[runId];
+    if (!run || run.transcript.some((item) => item.kind === 'steer' && item.id === prompt.id)) {
+      return {};
+    }
+    return {
+      runs: {
+        ...state.runs,
+        [runId]: {
+          ...run,
+          transcript: [...run.transcript, {
+            kind: 'steer',
+            id: prompt.id,
+            text: prompt.text,
+            attachments: prompt.attachments,
+          }],
+        },
+      },
+    };
+  }),
+  removeRuns: (runIds) => set((state) => {
+    const removed = new Set(runIds);
+    const runs = Object.fromEntries(
+      Object.entries(state.runs).filter(([id]) => !removed.has(id)),
+    );
+    return {
+      runs,
+      activeRunId: state.activeRunId && removed.has(state.activeRunId)
+        ? null
+        : state.activeRunId,
+    };
+  }),
   handleEvent: (event) => set((state) => {
     const id = state.activeRunId;
     if (!id || !state.runs[id]) return {};

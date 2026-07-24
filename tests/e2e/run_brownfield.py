@@ -22,7 +22,7 @@ def main() -> int:
     shutil.copytree(FIXTURE, workdir, dirs_exist_ok=True)
     print(f"Workdir: {workdir}")
     proc = subprocess.run(
-        [sys.executable, "-m", "nexcoder.cli", "--engine", "v2", "--auto",
+        [sys.executable, "-m", "nexcoder.cli", "--auto",
          "--project", str(workdir), PROMPT],
         timeout=1800)
     verify = subprocess.run([sys.executable, "-m", "pytest", "-q"],

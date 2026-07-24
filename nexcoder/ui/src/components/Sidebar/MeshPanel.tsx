@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, CircleAlert, Expand, Eye, FlaskConical, Hammer, Network,
-  ShieldCheck, Square,
+  Bot, ChevronDown, ChevronUp, CircleAlert, Expand, Eye, FlaskConical,
+  Hammer, Network, ShieldCheck, Square,
 } from 'lucide-react';
 import { useMeshStore, MeshAgent } from '../../store/useMeshStore';
 import { useProjectStore } from '../../store/useProjectStore';
@@ -43,6 +43,7 @@ export default function MeshPanel() {
   const mesh = useMeshStore();
   const { projectPath } = useProjectStore();
   const [goalInput, setGoalInput] = useState('');
+  const [goalExpanded, setGoalExpanded] = useState(false);
   const [showView, setShowView] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const elapsed = useElapsed(mesh.startedAt, mesh.active, mesh.elapsedSeconds);
@@ -76,6 +77,7 @@ export default function MeshPanel() {
     const goal = goalInput.trim();
     if (!goal) return;
     mesh.start(goal);
+    setGoalExpanded(false);
     setGoalInput('');
     const res = await meshRun(goal).catch((e) => ({ success: false, error: String(e) }));
     if (res && res.success === false) {
@@ -110,8 +112,8 @@ export default function MeshPanel() {
             explorer, implementation, test, and review agents.
           </p>
           <textarea
-            className="input"
-            rows={3}
+            className="input mesh-goal-input"
+            rows={6}
             placeholder={projectPath
               ? 'Describe a development goal…'
               : 'Open a project first'}
@@ -119,6 +121,10 @@ export default function MeshPanel() {
             value={goalInput}
             onChange={(e) => setGoalInput(e.target.value)}
           />
+          <div className="mesh-goal-input-meta">
+            <span>Long prompts are supported and kept intact.</span>
+            <span>{goalInput.length.toLocaleString()} characters</span>
+          </div>
           <button className="btn btn-primary w-full" disabled={!projectPath || !goalInput.trim()}
             onClick={handleStart}>
             Start Mesh
@@ -146,7 +152,22 @@ export default function MeshPanel() {
 
       {!idle && (
         <div className="mesh-run">
-          <div className="mesh-goal">{mesh.goal}</div>
+          <section className={`mesh-goal-card ${goalExpanded ? 'expanded' : ''}`}>
+            <div className="mesh-goal-card-heading">
+              <span>Goal</span>
+              <span>{mesh.goal.length.toLocaleString()} characters</span>
+            </div>
+            <div className="mesh-goal-text">{mesh.goal}</div>
+            <button
+              type="button"
+              className="mesh-goal-toggle"
+              aria-expanded={goalExpanded}
+              onClick={() => setGoalExpanded((expanded) => !expanded)}
+            >
+              {goalExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              {goalExpanded ? 'Collapse prompt' : 'View full prompt'}
+            </button>
+          </section>
           <div className="mesh-status-row">
             <span className={`mesh-chip mesh-chip-${mesh.active ? 'running' : (mesh.status === 'completed' ? 'completed' : 'failed')}`}>
               {mesh.status}

@@ -11,10 +11,19 @@ import { readFile } from './bridge';
 import { lspRequest } from './lsp';
 import { useEditorStateStore } from '../store/useEditorStateStore';
 import { useEditorSettingsStore } from '../store/useEditorSettingsStore';
+import { useProjectStore } from '../store/useProjectStore';
 import { getLanguageFromExtension } from '../utils/languageMap';
+import {
+  buildDiagnosticFixPrompt,
+  loadComposerPrompt,
+} from '../utils/diagnosticPrompt';
+import type { LspDiagnostic } from '../store/useDiagnosticsStore';
 
 const modelPaths = new WeakMap<object, string>();
 let providersRegistered = false;
+let diagnosticCommandsRegistered = false;
+const FIX_DIAGNOSTIC_COMMAND = 'nexcoder.fixDiagnosticWithAgent';
+const SEND_DIAGNOSTIC_COMMAND = 'nexcoder.sendDiagnosticToChat';
 
 const PROVIDER_LANGUAGES = [
   'python', 'typescript', 'javascript', 'html', 'css', 'json',
@@ -59,9 +68,75 @@ async function openFileAt(path: string, line: number, column: number): Promise<v
   }
 }
 
+function shortPathOf(path: string): string {
+  const projectPath = useProjectStore.getState().projectPath;
+  if (projectPath && path.toLowerCase().startsWith(projectPath.toLowerCase())) {
+    return path.slice(projectPath.length).replace(/^[\\/]/, '');
+  }
+  return path;
+}
+
+function markerSeverityToDiagnostic(monaco: Monaco, severity: number): number {
+  if (severity === monaco.MarkerSeverity.Error) return 1;
+  if (severity === monaco.MarkerSeverity.Warning) return 2;
+  if (severity === monaco.MarkerSeverity.Hint) return 4;
+  return 3;
+}
+
+function markerToDiagnostic(monaco: Monaco, marker: any): LspDiagnostic {
+  const markerCode = typeof marker.code === 'string' || typeof marker.code === 'number'
+    ? marker.code
+    : marker.code?.value !== undefined
+      ? String(marker.code.value)
+      : undefined;
+  return {
+    range: {
+      start: {
+        line: Math.max(0, (marker.startLineNumber || 1) - 1),
+        character: Math.max(0, (marker.startColumn || 1) - 1),
+      },
+      end: {
+        line: Math.max(0, (marker.endLineNumber || marker.startLineNumber || 1) - 1),
+        character: Math.max(0, (marker.endColumn || marker.startColumn || 1) - 1),
+      },
+    },
+    message: String(marker.message || ''),
+    severity: markerSeverityToDiagnostic(monaco, marker.severity),
+    source: marker.source,
+    code: markerCode,
+  };
+}
+
+function sendDiagnosticPrompt(monaco: Monaco, payload: any, send: boolean): void {
+  const path = String(payload?.path || '');
+  const marker = payload?.marker;
+  if (!path || !marker) return;
+  const diagnostic = markerToDiagnostic(monaco, marker);
+  const prompt = buildDiagnosticFixPrompt({
+    path,
+    shortPath: shortPathOf(path),
+    diagnostic,
+    lineText: String(payload?.lineText || ''),
+  });
+  window.nexcoder?.showAIPanel?.();
+  loadComposerPrompt({ content: prompt, mode: 'agent', send });
+}
+
+function registerDiagnosticCommands(monaco: Monaco): void {
+  if (diagnosticCommandsRegistered) return;
+  diagnosticCommandsRegistered = true;
+  monaco.editor.registerCommand(FIX_DIAGNOSTIC_COMMAND, (_accessor: any, payload: any) => {
+    sendDiagnosticPrompt(monaco, payload, true);
+  });
+  monaco.editor.registerCommand(SEND_DIAGNOSTIC_COMMAND, (_accessor: any, payload: any) => {
+    sendDiagnosticPrompt(monaco, payload, false);
+  });
+}
+
 export function registerLspProviders(monaco: Monaco): void {
   if (providersRegistered) return;
   providersRegistered = true;
+  registerDiagnosticCommands(monaco);
 
   for (const language of PROVIDER_LANGUAGES) {
     monaco.languages.registerCompletionItemProvider(language, {
@@ -104,6 +179,32 @@ export function registerLspProviders(monaco: Monaco): void {
       provideHover: async (model: any, position: any) => {
         const path = pathOf(model);
         if (!path) return null;
+        const markers = monaco.editor.getModelMarkers({ resource: model.uri })
+          .filter((marker: any) =>
+            marker.owner === 'nexlsp'
+            && marker.startLineNumber <= position.lineNumber
+            && marker.endLineNumber >= position.lineNumber
+            && marker.startColumn <= position.column
+            && marker.endColumn >= position.column);
+        if (markers.length > 0) {
+          const marker = markers[0];
+          const payload = encodeURIComponent(JSON.stringify([{
+            path,
+            marker,
+            lineText: model.getLineContent(marker.startLineNumber),
+          }]));
+          return {
+            contents: [{
+              value: [
+                `**${marker.message}**`,
+                '',
+                `[Send to Chat](command:${SEND_DIAGNOSTIC_COMMAND}?${payload})`,
+                `[Fix with NexCoder Agent](command:${FIX_DIAGNOSTIC_COMMAND}?${payload})`,
+              ].join('\n\n'),
+              isTrusted: true,
+            }],
+          };
+        }
         try {
           const contents = await lspRequest(
             'hover', path, position.lineNumber - 1, position.column - 1);
@@ -112,6 +213,46 @@ export function registerLspProviders(monaco: Monaco): void {
         } catch {
           return null;
         }
+      },
+    });
+
+    monaco.languages.registerCodeActionProvider(language, {
+      provideCodeActions: (model: any, _range: any, context: any) => {
+        const path = pathOf(model);
+        if (!path) return { actions: [], dispose: () => undefined };
+        const markers = (context.markers || []).filter((marker: any) =>
+          !marker.owner || marker.owner === 'nexlsp');
+        const actions = markers.flatMap((marker: any) => {
+          const payload = {
+            path,
+            marker,
+            lineText: model.getLineContent(marker.startLineNumber),
+          };
+          return [
+            {
+              title: 'Fix with NexCoder Agent',
+              diagnostics: [marker],
+              kind: 'quickfix',
+              isPreferred: true,
+              command: {
+                id: FIX_DIAGNOSTIC_COMMAND,
+                title: 'Fix with NexCoder Agent',
+                arguments: [payload],
+              },
+            },
+            {
+              title: 'Send Problem to Chat',
+              diagnostics: [marker],
+              kind: 'quickfix',
+              command: {
+                id: SEND_DIAGNOSTIC_COMMAND,
+                title: 'Send Problem to Chat',
+                arguments: [payload],
+              },
+            },
+          ];
+        });
+        return { actions, dispose: () => undefined };
       },
     });
 

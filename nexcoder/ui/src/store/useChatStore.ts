@@ -1,5 +1,14 @@
 import { create } from 'zustand';
-import { ChatMessage, AgentMode, AgentTask, AgentTaskPlan, AgentTaskStep, DiffHunk, FinalAnswer, Skill, TaskType, SessionMetadata } from '../types';
+import { ChatMessage, AgentMode, AgentTask, AgentTaskPlan, AgentTaskStep, DiffHunk, FinalAnswer, PromptAttachment, Skill, TaskType, SessionMetadata } from '../types';
+
+export interface QueuedPrompt {
+  id: string;
+  content: string;
+  mode: AgentMode;
+  skillId: string | null;
+  createdAt: number;
+  attachments: PromptAttachment[];
+}
 
 interface ChatState {
   messages: ChatMessage[];
@@ -13,6 +22,7 @@ interface ChatState {
   scanStepsByTask: Record<string, string[]>;
   sessions: SessionMetadata[];
   activeSessionId: string | null;
+  queuedPrompts: QueuedPrompt[];
   addMessage: (message: ChatMessage) => void;
   updateLastMessage: (content: string) => void;
   appendToLastMessage: (chunk: string) => void;
@@ -39,9 +49,16 @@ interface ChatState {
   setActiveSessionId: (sessionId: string | null) => void;
   upsertSession: (session: SessionMetadata) => void;
   removeSession: (sessionId: string) => void;
+  enqueuePrompt: (prompt: QueuedPrompt) => void;
+  prependPrompt: (prompt: QueuedPrompt) => void;
+  updateQueuedPrompt: (id: string, content: string) => void;
+  removeQueuedPrompt: (id: string) => void;
+  dequeuePrompt: () => QueuedPrompt | null;
+  clearQueuedPrompts: () => void;
+  rewindMessagesFrom: (messageId: string) => string[];
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   activeMode: 'ask',
   activeSkill: null,
@@ -53,6 +70,7 @@ export const useChatStore = create<ChatState>((set) => ({
   scanStepsByTask: {},
   sessions: [],
   activeSessionId: null,
+  queuedPrompts: [],
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
   updateLastMessage: (content) => set((state) => {
     const updated = [...state.messages];
@@ -209,7 +227,7 @@ export const useChatStore = create<ChatState>((set) => ({
     delete next[taskId];
     return { scanStepsByTask: next };
   }),
-  clearChat: () => set({ messages: [], tasks: [], pendingDiffs: [], activeDiffId: null, scanStepsByTask: {}, activeSessionId: null }),
+  clearChat: () => set({ messages: [], tasks: [], pendingDiffs: [], activeDiffId: null, scanStepsByTask: {}, activeSessionId: null, queuedPrompts: [] }),
   setMessages: (messages) => set({ messages }),
   setSessions: (sessions) => set({ sessions }),
   setActiveSessionId: (sessionId) => set({ activeSessionId: sessionId }),
@@ -224,4 +242,44 @@ export const useChatStore = create<ChatState>((set) => ({
     sessions: state.sessions.filter((session) => session.session_id !== sessionId),
     activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId,
   })),
+  enqueuePrompt: (prompt) => set((state) => ({
+    queuedPrompts: [...state.queuedPrompts, prompt],
+  })),
+  prependPrompt: (prompt) => set((state) => ({
+    queuedPrompts: [prompt, ...state.queuedPrompts],
+  })),
+  updateQueuedPrompt: (id, content) => set((state) => ({
+    queuedPrompts: state.queuedPrompts.map((prompt) => (
+      prompt.id === id ? { ...prompt, content } : prompt
+    )),
+  })),
+  removeQueuedPrompt: (id) => set((state) => ({
+    queuedPrompts: state.queuedPrompts.filter((prompt) => prompt.id !== id),
+  })),
+  dequeuePrompt: () => {
+    const next = get().queuedPrompts[0] ?? null;
+    if (next) {
+      set((state) => ({ queuedPrompts: state.queuedPrompts.slice(1) }));
+    }
+    return next;
+  },
+  clearQueuedPrompts: () => set({ queuedPrompts: [] }),
+  rewindMessagesFrom: (messageId) => {
+    const state = get();
+    const index = state.messages.findIndex((message) => message.id === messageId);
+    if (index < 0) return [];
+    const removedMessages = state.messages.slice(index);
+    const removedIds = new Set(removedMessages.map((message) => message.id));
+    set({
+      messages: state.messages.slice(0, index),
+      tasks: state.tasks.filter((task) => !removedIds.has(task.id)),
+      pendingDiffs: [],
+      activeDiffId: null,
+      scanStepsByTask: Object.fromEntries(
+        Object.entries(state.scanStepsByTask).filter(([taskId]) => !removedIds.has(taskId)),
+      ),
+      queuedPrompts: [],
+    });
+    return [...removedIds];
+  },
 }));

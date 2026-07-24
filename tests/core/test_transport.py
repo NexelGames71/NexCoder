@@ -95,6 +95,25 @@ def test_native_adapter_reports_bad_arguments_json():
     assert turn.parse_error
 
 
+def test_native_adapter_deduplicates_identical_calls():
+    message = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"id": "first", "type": "function", "function": {
+                "name": "read_file", "arguments": '{"path":"build.py"}'}},
+            {"id": "duplicate", "type": "function", "function": {
+                "name": "read_file", "arguments": '{"path":"build.py"}'}},
+            {"id": "other", "type": "function", "function": {
+                "name": "read_file", "arguments": '{"path":"README.md"}'}},
+        ],
+    }
+
+    turn = NativeAdapter().parse_assistant_message(message)
+
+    assert [call.id for call in turn.tool_calls] == ["first", "other"]
+
+
 def test_request_extras_and_prompt_suffix():
     assert XmlAdapter().request_extras(SCHEMAS) == {}
     assert NativeAdapter().request_extras(SCHEMAS) == {"tools": SCHEMAS}

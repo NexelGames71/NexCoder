@@ -31,7 +31,7 @@ def test_read_only_modes_have_no_mutating_tools():
         names = set(belt.names)
         assert not names & {"write_file", "edit_file", "run_command",
                             "create_directory", "move_path"}, mode
-        assert {"read_file", "grep", "glob"} <= names, mode
+        assert {"read_file", "grep", "glob", "code_search"} <= names, mode
 
 
 def test_write_modes_have_full_belt():

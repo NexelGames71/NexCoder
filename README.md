@@ -1,136 +1,305 @@
 # NexCoder
 
-NexCoder is a production-grade agentic coding IDE for the Nexa ecosystem: a
-PySide6 desktop app embedding a React + TypeScript + Monaco frontend in
-`QWebEngineView`, with Python services exposed through `QWebChannel`.
+NexCoder is an AI-first coding workspace from Nexa Labs. It helps you open a
+project, understand the codebase, ask questions, fix bugs, make edits, run
+commands, review changes, and work with images or project files from one
+desktop app.
 
-One engine powers everything. Every AI surface — the chat panel's Agent,
-Ask, Edit, Debug, Review, and Scan modes, and the terminal CLI — is a thin
-policy profile (system prompt + tool subset + turn budget) over the same
-v2 agentic core (`nexcoder/agent/core/`).
+NexCoder is built for people who want an assistant that can do more than chat.
+It can inspect your project, read the active file, see selected code, understand
+open problems, edit files, run tests, and explain what changed.
 
-## Highlights
+## What you can do with NexCoder
 
-- **Agentic loop** — plans with a visible todo list, edits files directly
-  (checkpoint-backed revert per run or per file), asks permission before
-  running commands, verifies its own work, records trajectories.
-- **Structural safety** — read-only modes (Ask/Review/Scan) simply do not
-  receive mutating tools; permission gates + per-project command allowlist
-  guard the rest. Full-auto mode still denies risky commands.
-- **Auto-context** — the active editor file and text selection travel with
-  every run ("fix this" means the selected code).
-- **Persistent chat history** — every run appends to a per-project session
-  (`.nexcoder/sessions/`); follow-up prompts replay recent conversation;
-  history survives restarts and is browsable in the Chats sidebar.
-- **Skills** — a Claude-Code-style skill catalog (commit, code-review,
-  systematic-debugging, …) the agent loads on demand; invoke directly with
-  `/skill-id` or `--skill`. Projects add their own under
-  `.nexcoder/skills/<id>/SKILL.md`.
-- **Context management** — token budgeting, two-stage compaction, and a
-  hard force-fit guarantee before every model call; live context meter in
-  the composer.
-- **Local-first** — runs fully offline against a local GGUF model server;
-  switching to a hosted GPU endpoint is config-only.
+- Open a local folder and browse your project files.
+- Edit code with Monaco, the same editor engine used by VS Code.
+- Ask NexCoder questions about your codebase.
+- Let the agent fix bugs or implement features.
+- Use Plan mode to review an implementation plan before code changes happen.
+- Use Agent Mesh for larger tasks that benefit from exploration,
+  implementation, testing, and review steps.
+- See project problems and diagnostics in the Problems panel.
+- Open images, audio, video, PDFs, fonts, and other files without corrupting
+  them as text.
+- Upload images to supported vision models so the AI can analyze screenshots,
+  UI issues, rendering bugs, or visual problems.
+- Run project commands in the integrated terminal.
+- Revert AI-made file changes when needed.
+- Switch between configured AI models when one is slow, unavailable, or
+  rate-limited.
 
-## Development
+## Quick start
+
+1. Launch NexCoder.
+2. Choose **Open Folder**.
+3. Select the project you want to work on.
+4. Open a file or ask NexCoder to scan the project.
+5. Type a task in the AI panel.
+
+Example prompts:
+
+```text
+Scan this project and explain how it works.
+```
+
+```text
+Fix the errors shown in the Problems panel.
+```
+
+```text
+Review the authentication code for security issues.
+```
+
+```text
+Use this screenshot to diagnose why the UI is misaligned.
+```
+
+## AI modes
+
+NexCoder includes several modes so you can choose how much control the AI has.
+
+| Mode | Best for | Can edit files? |
+|---|---|---:|
+| Ask | Explanations, architecture questions, code understanding | No |
+| Agent | Multi-step coding tasks, fixes, feature work | Yes |
+| Edit | Focused changes to selected code or active files | Yes |
+| Debug | Reproducing and fixing errors | Yes |
+| Review | Code review and risk analysis | No |
+| Scan | Mapping a new project | No |
+| Plan | Creating a reviewable implementation plan | No, until approved |
+| Terminal | Build/test/tooling tasks | Can run commands |
+
+Read-only modes are intentionally limited. If you choose Ask, Review, Scan, or
+Plan, NexCoder should inspect and explain without changing your files.
+
+## Working with the agent
+
+When you run the agent, NexCoder can:
+
+1. Read relevant files.
+2. Search the codebase.
+3. Create a short task list.
+4. Edit files.
+5. Run safe commands or ask for approval.
+6. Use diagnostics from the Problems panel.
+7. Summarize what changed.
+8. Let you revert changes if needed.
+
+For best results, be specific:
+
+```text
+Fix the TypeScript errors in the Problems panel and run the frontend build.
+```
+
+```text
+In main.py, make the settings button open the agent settings page.
+```
+
+```text
+Use the attached screenshot to identify the rendering issue, then fix the
+smallest likely cause.
+```
+
+## Model selection
+
+NexCoder can use OpenAI-compatible model providers, including Nexa-hosted
+models, NVIDIA-hosted models, local GGUF servers, or other compatible APIs.
+
+Use the model selector in the composer to switch models. This is useful when:
+
+- A model is too slow.
+- A model returns HTTP 429 rate-limit or capacity errors.
+- A text-only model cannot analyze an image.
+- You want a faster model for small edits.
+- You want a stronger model for large agent tasks.
+
+If you upload an image, choose a model that supports vision. Text-only models
+will reject image input.
+
+## Images and file previews
+
+NexCoder can preview common project files directly in the editor.
+
+Supported preview categories include:
+
+- Images: PNG, JPG, JPEG, GIF, WebP, SVG, ICO, BMP, TIFF, HEIC/HEIF where
+  supported by the runtime.
+- Audio: MP3, WAV, OGG, M4A, AAC, OPUS, MIDI.
+- Video: MP4, WebM, MOV, MKV, AVI, M4V.
+- Documents: PDF.
+- Fonts: preview samples.
+- Unknown binary files: safe metadata preview.
+
+Binary files are not opened as plain text. This helps prevent corrupted output
+when opening media, archives, executables, or generated assets.
+
+## Problems panel
+
+The Problems panel shows diagnostics reported by the project language tools.
+These can include errors, warnings, and hints.
+
+You can use it in two ways:
+
+- Click a problem to jump to the relevant file.
+- Ask the agent to fix the visible problems.
+
+Example:
+
+```text
+Fix the current Problems panel errors, then run the right validation command.
+```
+
+The agent receives the problem count and problem details as context, so it does
+not need you to manually copy every error message.
+
+## Agent Mesh
+
+Agent Mesh is for larger tasks. Instead of treating a big request as one long
+chat turn, NexCoder can split the goal into coordinated work units such as:
+
+- exploration
+- implementation
+- testing
+- review
+
+Use Agent Mesh when the task is broad, risky, or likely to need multiple passes.
+
+Example:
+
+```text
+Upgrade this game project, verify the executable exists, and do not report
+success until the build output is confirmed.
+```
+
+Agent Mesh can still fail or complete with issues. Always read the final report
+and verify important results.
+
+## Plan mode
+
+Plan mode is for controlled work. NexCoder inspects the project and writes an
+implementation plan first. You can review it before allowing code changes.
+
+Use Plan mode when:
+
+- The task is large.
+- The change touches many files.
+- You want to approve the approach before implementation.
+- You need a clear definition of done.
+
+The plan should explain:
+
+- what NexCoder found
+- what files will change
+- the implementation phases
+- validation steps
+- risks
+- what counts as complete
+
+## Reverting AI changes
+
+NexCoder creates checkpoints around AI-made edits so you can recover from bad
+changes.
+
+You can revert:
+
+- a whole run
+- a single changed file
+- changes made after a specific prompt when editing and resending that prompt
+
+Prompt edit/resend is designed to keep earlier work intact while removing later
+conversation turns and file changes caused by the edited prompt.
+
+## Terminal
+
+The integrated terminal lets you run project commands without leaving NexCoder.
+
+Common uses:
 
 ```powershell
-python -m venv venv
-venv\Scripts\python.exe -m pip install -r requirements.txt
-venv\Scripts\python.exe -m pip install -r requirements-gpu.txt
-cd nexcoder\ui
-npm.cmd install
+python main.py
+```
+
+```powershell
 npm.cmd run build
-cd ..\..
-venv\Scripts\python.exe -m nexcoder.main
 ```
-
-Tests:
 
 ```powershell
-venv\Scripts\python.exe -m pytest tests -q
+python -m pytest
 ```
 
-## Build (packaged exe)
+On Windows, prefer `npm.cmd` instead of `npm` if PowerShell blocks npm scripts.
 
-```powershell
-venv\Scripts\python.exe build.py
-```
+## Privacy and safety
 
-The packaged app is written to `dist\NexCoder`. The frozen exe reads `.env`
-from its own directory.
+NexCoder is designed to keep project work under your control.
 
-## Local model (Qwen3-Coder-30B-A3B GGUF, recommended)
+- API keys should be stored in your local environment file, not pasted into
+  chat.
+- Read-only modes should not edit files.
+- AI file changes are checkpointed for rollback.
+- Commands may require approval depending on your settings.
+- Uploaded images are sent to the selected model only when you include them in
+  the prompt.
+- Project memory and chat history may contain sensitive details, so do not put
+  secrets in prompts or memory.
 
-Models and the serving stack live centrally in `C:\Nexa` (see
-`C:\Nexa\GGUF_SERVING.md`). The MoE 30B (3B active) runs on 32GB RAM + a
-consumer GPU by housing the KV cache in system RAM:
+If you are using a hosted model, the model provider receives the prompt context
+needed for the request. Use local or trusted endpoints for sensitive projects.
 
-```powershell
-C:\Nexa\start_gguf.bat            # default: Qwen3-Coder-30B at :8002
-```
+## Troubleshooting
 
-Tuning env vars: `NEXCODER_GGUF_GPU_LAYERS` (raise with more VRAM, lower on
-OOM), `NEXCODER_GGUF_CTX` (server context), `NEXCODER_GGUF_KV_OFFLOAD=0`
-(KV in RAM). The server is OpenAI-compatible, so other coding agents
-(Cursor, etc.) can use it too — `start_tunnel.bat` exposes it via
-cloudflared (set `NEXCODER_API_KEY` first).
+### The model returns HTTP 429
 
-## CLI agent
+HTTP 429 usually means the provider accepted your key but is rate-limiting you
+or has no capacity for that model right now.
 
-```powershell
-# Interactive (prompts before each command; [a]lways adds to the allowlist)
-venv\Scripts\python.exe -m nexcoder.cli --project C:\MyApp "fix the failing test"
+Try:
 
-# Full auto (no command prompts; risky commands still denied)
-venv\Scripts\python.exe -m nexcoder.cli --auto --project C:\MyApp "build a landing page"
+- switch to another model
+- wait and retry
+- reduce the prompt size
+- use a faster/smaller model
+- use a higher-quota endpoint
 
-# Mode profiles (agent | ask | edit | debug | review | scan)
-venv\Scripts\python.exe -m nexcoder.cli --mode review --project C:\MyApp "review the auth module"
+### The model rejects an image
 
-# Skills
-venv\Scripts\python.exe -m nexcoder.cli "/commit group and commit my changes"
-venv\Scripts\python.exe -m nexcoder.cli --skill code-review "review the auth module"
+The selected model is probably text-only. Switch to a vision-capable model and
+send the image again.
 
-# Machine-readable events
-venv\Scripts\python.exe -m nexcoder.cli --jsonl --project C:\MyApp "scan the project"
-```
+### The agent is slow
 
-## Configuration
+Large reasoning models can be slow, especially with long prompts or big
+projects. Try a faster model for small edits and reserve large models for deep
+tasks.
 
-Env vars (also read from `.env` next to the repo root or the frozen exe):
+### The agent keeps reading the codebase again
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `NEXA_API_URL` | `http://127.0.0.1:8002` | OpenAI-compatible backend |
-| `NEXA_MODEL` | `default` | Model name sent to the backend |
-| `NEXCODER_ADAPTER` | `xml` | Tool-call transport: `xml` (local GGUF) or `native` (OpenAI function calling) |
-| `NEXA_CONTEXT_WINDOW` | `32768` | Context budget for compaction |
+This can happen when:
 
-All of these are also editable live in the app under Agent Settings
-(`Ctrl+Shift+,`), alongside the per-project command allowlist and the
-project memory the agent injects into every run.
+- the project is new
+- there is no saved project memory yet
+- the task is broad
+- context was compacted
+- the active file or selection is unclear
 
-**GPU-server migration:** point `NEXA_API_URL` at the hosted endpoint and
-set `NEXCODER_ADAPTER=native`. Nothing else changes.
+Give the agent a specific file, error, screenshot, or goal to reduce repeated
+exploration.
 
-## Per-project state (`.nexcoder/`)
+### The terminal stops or is interrupted
 
-| Path | Contents |
-|---|---|
-| `sessions/` | Chat history (index + JSONL messages per session) |
-| `checkpoints/` | Revert snapshots taken before every mutation |
-| `permissions.json` | Always-allowed commands |
-| `MEMORY.md` | Durable project memory (agent `remember` tool) |
-| `repo_map.json` | Cached repository map |
-| `trajectories/` | Compact JSONL run traces |
-| `skills/` | Project-local skills (override built-ins by id) |
+Start a new terminal from the terminal controls. If it keeps happening, restart
+NexCoder and reopen the project.
 
-## Acceptance harnesses
+### A file does not preview
 
-Require the local model server:
+Some media formats depend on what the embedded browser runtime supports. If a
+file cannot be previewed, NexCoder should still show a safe binary preview
+instead of corrupting it as text.
 
-```powershell
-venv\Scripts\python.exe tests\e2e\run_greenfield.py
-venv\Scripts\python.exe tests\e2e\run_brownfield.py
-```
+## More documentation
+
+For a complete user guide, see [`docs/user-guide.md`](docs/user-guide.md).
+
+## License
+
+Proprietary. NexCoder is part of the Nexa Labs product ecosystem.

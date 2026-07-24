@@ -239,7 +239,7 @@ html, body, #root {
   min-height: 80px;
   max-height: 600px;
   background: var(--bg-panel);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid #1e1e1e;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -269,7 +269,7 @@ html, body, #root {
 
 .resize-handle-horizontal:hover,
 .resize-handle-horizontal.active {
-  background: var(--accent-purple);
+  background: #2d2d2d;
 }
 
 .resize-handle-vertical {
@@ -281,7 +281,7 @@ html, body, #root {
 
 .resize-handle-vertical:hover,
 .resize-handle-vertical.active {
-  background: var(--accent-purple);
+  background: #2d2d2d;
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────── */
@@ -512,6 +512,23 @@ html, body, #root {
 
 .statusbar-item.clickable:hover {
   color: var(--text-primary);
+}
+
+.statusbar-item.problem-count {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #24242b;
+  color: #d8d8df;
+}
+
+.statusbar-item.problem-count.error {
+  background: rgba(240, 106, 106, 0.14);
+  color: #ff8f8f;
+}
+
+.statusbar-item.problem-count.warning {
+  background: rgba(229, 199, 107, 0.14);
+  color: #f2d98c;
 }
 
 /* ── Dropdown ────────────────────────────────────────────────────── */

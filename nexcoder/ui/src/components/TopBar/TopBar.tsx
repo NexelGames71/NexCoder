@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Play, GitCommit, Settings, Bot, LogIn, LogOut, Code } from 'lucide-react';
 import { useProjectStore } from '../../store/useProjectStore';
 import BranchBadge from './BranchBadge';
@@ -39,7 +39,13 @@ export default function TopBar({ onToggleSettings, onToggleAgentSettings, onTogg
       </div>
 
       <div className="topbar-center">
-        <QuickSearch />
+        <QuickSearch
+          onOpenEditorSettings={onToggleSettings}
+          onOpenAgentSettings={onToggleAgentSettings}
+          onOpenAuth={onToggleAuth}
+          onLogout={onLogout}
+          user={user}
+        />
       </div>
 
       <div className="topbar-right">
@@ -98,7 +104,7 @@ export default function TopBar({ onToggleSettings, onToggleAgentSettings, onTogg
         ) : (
           <button 
             className="btn btn-ghost tooltip" 
-            data-tooltip="Login to Appwrite Sync"
+            data-tooltip="Login with NexCoder Web"
             onClick={onToggleAuth}
             style={{ padding: '4px var(--space-2)', height: '28px' }}
           >
@@ -110,3 +116,4 @@ export default function TopBar({ onToggleSettings, onToggleAgentSettings, onTogg
     </div>
   );
 }
+

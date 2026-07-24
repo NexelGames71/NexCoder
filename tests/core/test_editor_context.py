@@ -51,6 +51,38 @@ def test_long_selection_truncates():
     assert len(out) < MAX_SELECTION_CHARS + 400
 
 
+def test_diagnostics_summary_is_visible_to_agent(tmp_path):
+    target = tmp_path / "src" / "main.py"
+    context = {
+        "diagnostic_counts": {"total": 2, "errors": 1, "warnings": 1},
+        "diagnostics": [
+            {
+                "path": str(target),
+                "relative_path": "src/main.py",
+                "line": 61,
+                "column": 9,
+                "severity": 1,
+                "source": "pyright",
+                "message": "Cannot assign to attribute",
+            },
+            {
+                "path": str(target),
+                "relative_path": "src/main.py",
+                "line": 70,
+                "column": 5,
+                "severity": 2,
+                "message": "Possibly unbound variable",
+            },
+        ],
+    }
+
+    out = render_editor_context(context, project_root=tmp_path)
+
+    assert "Open IDE problems: 2 total (1 errors, 1 warnings)." in out
+    assert "- error src/main.py:61:9 [pyright]: Cannot assign to attribute" in out
+    assert "- warning src/main.py:70:5: Possibly unbound variable" in out
+
+
 def test_chat_history_empty_and_junk():
     assert render_chat_history(None) == ""
     assert render_chat_history([]) == ""
